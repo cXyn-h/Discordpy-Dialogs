@@ -1,0 +1,28 @@
+- dialog:
+  name: "welcome"
+  prompt: "Hi how can I help?"
+  options:
+    - label: "Questionnaire"
+      id: "Questionnaire"
+      dialog: "Questionnaire"
+    - label: "nothing"
+      id: "nothing"
+      command: "clean_clickables"
+- dialog:
+  name: "Questionnaire"
+  prompt: "do you really want the questionnaire?"
+  options:
+    - label: "yes"
+      id: "yes"
+      flag: "purple"
+      end: true
+      dialog: "giveQuestions"
+    - label: "no"
+      id: "no"
+      command: "clean_clickables"
+      dialog:
+        prompt: "that's ok you can come back later"
+        name: "ok"
+- dialog:
+  prompt: "psych it's not done yet"
+  name: "giveQuestions"
