@@ -31,11 +31,11 @@ class Option:
         if "command" in args:
             self.command = args["command"]
         if "dialog" in args:
-            self.command = args["dialog"]
-        if "flag" in args:
-            self.command = args["flag"]
-        if "dialog" in args:
             self.dialog = args["dialog"]
+        if "flag" in args:
+            self.flag = args["flag"]
+        if "data" in args:
+            self.data = args["data"]
     
     def __repr__(self):
         return f"option {self.label}"
