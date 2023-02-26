@@ -19,6 +19,7 @@ from DialogHandling.DialogObjects import *
 #TODO: Figure out what sorts of data get passed into callbacks
 #       currently: dialog callbacks won't have progress or interaction ones
 #       callbacks from interactions hve interaction, and progress if data has been added
+#TODO: filters for who can interaction with nodes
 
 class DialogHandler():
     # passing in dialogs and callbacks if you want them shared between instances. not tested yet
@@ -33,60 +34,76 @@ class DialogHandler():
         self.register_dialog_callback(self.clean_clickables)
         self.register_dialog_callback(submit_results)
         # this dialog might not be used in future
-        self.nodes["default_completed"] = Dialog({"name":"default_completed", "prompt":"completed"})
+        self.nodes["default_completed"] = self.parse_node({"id":"default_completed", "prompt":"completed"})
 
     def parse_node(self, yaml_node):
         #TODO: more edgecase and format guards for loading files
-        if (not "name" in yaml_node):
-            # basically all loaded items must have a name
-            print("yaml object (dialog or modal definition) mis-formed. skipping")
-            raise Exception("yaml object misformed")
+        if (not "id" in yaml_node):
+            # basically all loaded nodes must have a id
+            raise Exception("node missing id: "+ str(yaml_node))
 
-        if yaml_node["name"] in self.nodes:
-            raise Exception("redefinition of existing node")
+        if yaml_node["id"] in self.nodes:
+            raise Exception("node \""+yaml_node["id"]+"\" has been redefined. 2nd definition: "+ str(yaml_node))
 
-        # yaml needs a type flag to specify what it is, default is dialog object
+        # yaml definition needs a type flag to specify if it is not a dialog node
         if "type" in yaml_node and yaml_node["type"] == "modal":
             if (not "title" in yaml_node):
-                # basically all modals must have a name
-                print("modal mis-formed. skipping")
-                raise Exception("modal misformed")
+                # basically all modals must have a separate title to display to all interacters
+                raise Exception("modal node missing title "+str(yaml_node))
+
+            if "options" in yaml_node:
+                print("modal node", yaml_node["id"],"definition has options defined in it. Note this will be ignored")
 
             fields = {}
             if "fields" in yaml_node:
                 for yaml_field in yaml_node["fields"]:
                     if (not "label" in yaml_field) or (not "id" in yaml_field):
-                        print("field for modal", yaml_node["name"], "mis-formed. skipping")
-                        continue
+                        raise Exception("modal node \""+yaml_node["id"]+"\" has mis formed field" + yaml_field )
                     # note, temporarily using option class because it has all the parameters needed already
-                    fields[yaml_field["id"]] = Option(yaml_field)
+                    fields[yaml_field["id"]] = OptionInfo(yaml_field)
             return ModalInfo({**yaml_node, "fields":fields})
         else:
+            # assuming if not labeled or otherwise labeled incorrectly, is a dialog. 
+            if (not "prompt" in yaml_node):
+                # currently requiring all dialog nodes need a prompt
+                raise Exception("dialog node missing prompt: "+ str(yaml_node))
+
+            if "fields" in yaml_node:
+                print("dialog node definition has fields defined in it. Note this will be ignored")
+
             options = {}
-            # ensure options for this dialog are loaded correctly before registering dialog
+            # ensure any options for this dialog are loaded correctly before saving dialog
             if "options" in yaml_node:
                 for yaml_option in yaml_node["options"]:
-                    options[yaml_option["id"]] = self.load_option(yaml_option)
-            # assuming if not labeled or otherwise labeled incorrectly, is a dialog. 
-            return Dialog({**yaml_node, "options":options})
+                    loaded_option = self.load_option(yaml_option, yaml_node)
+                    if loaded_option.id in options:
+                        raise Exception("option \""+loaded_option.id+"\" already defined for dialog node \""+yaml_node["id"]+"\"")
+                    options[yaml_option["id"]] = loaded_option
+            return DialogInfo({**yaml_node, "options":options})
 
-    def load_option(self, yaml_option):
+    def load_option(self, yaml_option, yaml_parent_dialog):
+        ''' creates and returns OptionInfo object to hold option data. raises exceptions when data is missing and adds 
+                any in-line definitions for nodes to the handler'''
         if (not "label" in yaml_option) or (not "id" in yaml_option):
-            # print("option for dialog", yaml_node["name"], "mis-formed. skipping")
-            raise Exception("option misformed")
+            raise Exception("option missing label or id"+ str(yaml_option))
 
         if "next_node" in yaml_option and (not type(yaml_option["next_node"]) is str):
-            self.nodes[yaml_option["next_node"]["name"]] = self.parse_node(yaml_option["next_node"])
-            yaml_option["next_node"] = yaml_option["next_node"]["name"]
-        return Option(yaml_option)
+            # mext_node should be the id of next node. In line definitions have a dict there. need to be created and changed to id
+            self.nodes[yaml_option["next_node"]["id"]] = self.parse_node(yaml_option["next_node"])
+            if yaml_option["next_node"]["id"] == yaml_parent_dialog["id"]:
+                # edge case where the next node of this option can try to define the same node currently in the middle of being loaded. 
+                #       loops are allowed but redefining not. currently would get overwritten by parse node later
+                print("warning, bad format. option",yaml_option["id"],"next node is redefining node currently being parsed. will be overwritten once parsing is done")
+            yaml_option["next_node"] = yaml_option["next_node"]["id"]
+        return OptionInfo(yaml_option)
 
     def load_file(self, file_name):
-        '''load a yaml file with one or more yaml documents defining nodes into python objects'''
+        '''load a yaml file with one or more yaml documents defining nodes into python objects. Those definitions are stored in self'''
         with open(file_name) as file:
             doc_dict = yaml.safe_load_all(file)
             for yaml_doc in doc_dict:
                 for yaml_node in yaml_doc:
-                    self.nodes[yaml_node["name"]] = self.parse_node(yaml_node)
+                    self.nodes[yaml_node["id"]] = self.parse_node(yaml_node)
         print("finished loading files", self.nodes)
     
     def final_validate():
@@ -182,7 +199,7 @@ class DialogHandler():
     async def do_node_action(self, node_name, interaction_or_context, msg_opts = {}):
         #TODO: this has a lot of spaghetti mess thoughts around format. very WIP
         node_info = self.nodes[node_name]
-        if isinstance(node_info, Dialog):
+        if isinstance(node_info, DialogInfo):
             await self.send_dialog(
                     interaction_send_message_wrapper(interaction_or_context) 
                         if issubclass(interaction_or_context, Interaction) else interaction_or_context,
@@ -203,22 +220,22 @@ class DialogHandler():
         # grab information needed to handle interaction on any supported node type
         node_info = self.nodes[interaction.extras["node_name"]]
         saved_progress = None
-        if (interaction.user.id, node_info.name) in self.flow_progress:
-            saved_progress = self.flow_progress[(interaction.user.id, node_info.name)]
+        if (interaction.user.id, node_info.id) in self.flow_progress:
+            saved_progress = self.flow_progress[(interaction.user.id, node_info.id)]
         next_node_name = None
         end_progress_transfer = None
         
         if interaction.type == InteractionType.modal_submit:
             print("dialog handler modal submit branch")
 
-            if not (interaction.user.id, node_info.name) in self.flow_progress:
-                self.flow_progress[(interaction.user.id, node_info.name)] = {"node_name": node_info.name, "user":interaction.user, "type": "modal"}
-                saved_progress = self.flow_progress[(interaction.user.id, node_info.name)]
+            if not (interaction.user.id, node_info.id) in self.flow_progress:
+                self.flow_progress[(interaction.user.id, node_info.id)] = {"node_name": node_info.id, "user":interaction.user, "type": "modal"}
+                saved_progress = self.flow_progress[(interaction.user.id, node_info.id)]
             
-            self.flow_progress[(interaction.user.id, node_info.name)]["modal_submits"] = {}
+            self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"] = {}
             #TODO: saving modal submit information needs a bit of format finetuning
-            self.flow_progress[(interaction.user.id, node_info.name)]["modal_submits"][node_info.name] = interaction.data["components"]
-            print("dialog handler updated saved progres with modal submitted info", self.flow_progress[(interaction.user.id, node_info.name)]["modal_submits"])
+            self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"][node_info.id] = interaction.data["components"]
+            print("dialog handler updated saved progres with modal submitted info", self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"])
 
             if node_info.submit_callback and node_info.submit_callback in self.callbacks:
                 await self.execute_command_callback(node_info.submit_callback, 
@@ -234,17 +251,17 @@ class DialogHandler():
 
             # grabbing dialog specific information
             chosen_option = node_info.options[interaction.data["custom_id"]]
-            print("found interaction on", "message", interaction.message.id, "is for dialog", node_info.name, "chosen option:", chosen_option, "dialog info", chosen_option.next_node)
+            print("found interaction on", "message", interaction.message.id, "is for dialog", node_info.id, "chosen option:", chosen_option, "dialog info", chosen_option.next_node)
 
             # update saved data because any flags and data from an option applies when that option is chosen
             if chosen_option.data or chosen_option.flag:
                 # might not be any preexisting saved data, create it
-                if not (interaction.user.id, node_info.name) in self.flow_progress:
-                    print("save data added for", (interaction.user.id, node_info.name), "because the option adds data")
-                    self.flow_progress[(interaction.user.id, node_info.name)] = {"node_name": node_info.name, "user":interaction.user, "type": "dialog"}
-                    saved_progress = self.flow_progress[(interaction.user.id, node_info.name)]
+                if not (interaction.user.id, node_info.id) in self.flow_progress:
+                    print("save data added for", (interaction.user.id, node_info.id), "because the option adds data")
+                    self.flow_progress[(interaction.user.id, node_info.id)] = {"node_name": node_info.id, "user":interaction.user, "type": "dialog"}
+                    saved_progress = self.flow_progress[(interaction.user.id, node_info.id)]
                 else:
-                    print("handle interaction found save data for", (interaction.user.id, node_info.name))
+                    print("handle interaction found save data for", (interaction.user.id, node_info.id))
 
                 if chosen_option.data:
                     if not "data" in saved_progress:
@@ -252,7 +269,7 @@ class DialogHandler():
                     saved_progress["data"].update(chosen_option.data)
                 if chosen_option.flag:
                     saved_progress["flag"] = chosen_option.flag
-            print("dialog handler handle interaction saved progress before callback", "this interaction progress", self.flow_progress[(interaction.user.id, node_info.name)].keys() if (interaction.user.id, node_info.name) in self.flow_progress else "NONE" , "all keys", self.flow_progress.keys())
+            print("dialog handler handle interaction saved progress before callback", "this interaction progress", self.flow_progress[(interaction.user.id, node_info.id)].keys() if (interaction.user.id, node_info.id) in self.flow_progress else "NONE" , "all keys", self.flow_progress.keys())
             
             # handling callback stage
             if chosen_option.command:
@@ -272,7 +289,7 @@ class DialogHandler():
         #       of an existing dialog just so that we can go to a different dialog
         if next_node_name in self.nodes:
             next_node = self.nodes[next_node_name]
-            if isinstance(next_node, Dialog):
+            if isinstance(next_node, DialogInfo):
                 # TODO: assuming when need to progress is getting messy.
                 #       some dialogs branch and need to transfer data, others do not. the guessing so far supports a help 
                 #       button that prints out extra message, does not affect save state, and execute continues from message with help button
@@ -283,22 +300,22 @@ class DialogHandler():
                 # print("dialog handler end of handling interaction internal", interaction)
                 if saved_progress:
                     if must_advance_progress:
-                        self.flow_progress[(interaction.user.id, next_node_name)] = {**self.flow_progress[(interaction.user.id, node_info.name)], "type":"dialog"}
-                        del self.flow_progress[(interaction.user.id, node_info.name)]
+                        self.flow_progress[(interaction.user.id, next_node_name)] = {**self.flow_progress[(interaction.user.id, node_info.id)], "type":"dialog"}
+                        del self.flow_progress[(interaction.user.id, node_info.id)]
             elif isinstance(next_node, ModalInfo):
                 await interaction.response.send_modal(DialogModal(self, next_node_name))
                 if saved_progress:
                     if not end_progress_transfer:
-                        self.flow_progress[(interaction.user.id, next_node_name)] = self.flow_progress[(interaction.user.id,node_info.name)]
+                        self.flow_progress[(interaction.user.id, next_node_name)] = self.flow_progress[(interaction.user.id,node_info.id)]
                         self.flow_progress[(interaction.user.id, next_node_name)]["type"] = "modal"
-                    del self.flow_progress[(interaction.user.id,node_info.name)]
+                    del self.flow_progress[(interaction.user.id,node_info.id)]
         else:
             # no next node, end of line so clean up
             await interaction.response.send_message(content="interaction completed", ephemeral=True)
             if saved_progress:
                 if interaction.message.id in self.active_listeners:
                     await self.clean_clickables(self.active_listeners[interaction.message.id])
-                del self.flow_progress[(interaction.user.id, node_info.name)]
+                del self.flow_progress[(interaction.user.id, node_info.id)]
         open_dialog_info = ", ".join(["{ id:"+str(message_id)+ " dialog:"+save["dialog_name"]+"}" for message_id, save in self.active_listeners.items()])
         print("dialog handler end of handling interaction internal", "open dialogs", open_dialog_info, "saved progress", self.flow_progress.keys())
 
@@ -403,7 +420,7 @@ class DialogModal(ui.Modal):
 
 async def submit_results(open_dialog=None, progress=None, interaction=None):
     #NOTE: VERY ROUGH RESULT MESSAGE JUST FOR PROOF OF CONCEPT THAT DATA WAS STORED. MUST BE EDITED ONCE FORMAT IS FINALIZED (yes its messy)
-    await interaction.channel.send("questionairre received"+progress["modal_submits"]["questionairreModal"][0]["components"][0]["value"])
+    await interaction.channel.send("questionairre received "+progress["modal_submits"]["questionairreModal"][0]["components"][0]["value"])
 
 
 #testing pop up modals. copied from docs. this one allows clicker to input information. has to be done in response to interactions

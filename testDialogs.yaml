@@ -1,5 +1,5 @@
 - type: "dialog"
-  name: "welcome"
+  id: "welcome"
   prompt: "Hi how can I help?"
   options:
     - label: "Questionnaire"
@@ -12,7 +12,7 @@
     - label: "nothing"
       id: "nothing"
       command: "clean_clickables"
-- name: "Questionnaire"
+- id: "Questionnaire"
   prompt: "do you really want the questionnaire?"
   options:
     - label: "yes"
@@ -25,11 +25,11 @@
       command: "clean_clickables"
       next_node:
         prompt: "that's ok you can come back later"
-        name: "ok"
+        id: "ok"
 - prompt: "psych it's not done yet"
-  name: "giveQuestions"
+  id: "giveQuestions"
 ---
-- name: "reportDirections"
+- id: "reportDirections"
   prompt: "I'll need some more information. Please note if you do not finish you will need to restart. step 1, blah blah"
   options:
     - label: "complete"
@@ -38,9 +38,9 @@
     - label: "help"
       id: "help1"
       next_node:
-        name: "help1"
+        id: "help1"
         prompt: "how to do step 1 hdfwejtiwejapgiwjep"
-- name: "reportDirections2"
+- id: "reportDirections2"
   prompt: "ok step 2, ahajdljigrijrgjlihlthljthlj"
   options:
     - label: "complete 2"
@@ -49,17 +49,17 @@
     - label: "help"
       id: "help2"
       next_node:
-        name: "help2"
+        id: "help2"
         prompt: "how to do step 2 grehjpethopjryj[komrjypk[,"
 - type: "dialog"
-  name: "reportDirections3"
+  id: "reportDirections3"
   prompt: "ok step 3, JREIJ[ORT,P["
   options:
     - label: "complete 3"
       id: "complete"
       end: True
 - type: "modal"
-  name: "questionairreModal"
+  id: "questionairreModal"
   title: "simple test questions"
   fields:
     - label: "name"

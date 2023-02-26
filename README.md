@@ -18,7 +18,7 @@ DialogHandler will need to be instantiated. Any methods that need to start a dia
 ## Creating Dialog yamls
 Dialogs are saved in yaml files. The example dialog flow is all defined in `testDialogs.yaml` and shows most all the different possible ways to create each of the items. Some terms first: A node is either a dialog or a modal and represents some action done and are now waiting for user to respond with a choice. Multiple nodes can be defined in one file, and multiple files loaded into one Handler. Here are the fields that need to be listed out in a yaml file.
 Dialog definition:  
-* name  -- must have. internal id for this dialog, must be unique among all loaded nodes
+* id  -- must have. internal id for this dialog, must be unique among all loaded nodes
 * type -- "type":"dialog" is optional because default is create a dialog node
 * prompt -- the text to prompt person for a response
 * 0 or 1 command -- callback function called after this dialog is sent
@@ -36,7 +36,7 @@ Option:
 Modal:
 * type -- must have "type":"modal" to create a modal node
 * title -- must have. title to be shown on the top of modal window
-* name -- must have. internal id for this modal, must be unique among all loaded nodes
+* id -- must have. internal id for this modal, must be unique among all loaded nodes
 * 1-5 fields -- list of text inputs boxes to add to the modal. Currently need to specify label (what shows up to user as name of the box) and id (custom id) for them, but exact details are still WIP
 * 0-1 submit_callback -- callback function called right after hitting submit modal
 * 0-1 next_node -- same as option next node, what should happen next

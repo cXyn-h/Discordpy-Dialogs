@@ -1,23 +1,24 @@
-class Dialog:
+class DialogInfo:
     def __init__(self, args):
-        print("dialog init internal",args)
-        self.name = args["name"]
+        # print("dialog init internal",args)
+        self.id = args["id"]
         #TODO: handle malformed input
         self.prompt= args["prompt"]
         self.command=""
         self.options={}
+        self.type = "dialog"
         if "options" in args:
             self.options = args["options"]
         if "command" in args:
             self.command = args["command"]
 
     def __repr__(self):
-        return f"Dialog {self.name} prompt: {self.prompt}, options: {self.options}"
+        return f"Dialog {self.id} prompt: {self.prompt}, options: {self.options}"
 
 #TODO: discord ui elements styles can be defined in yaml files
-class Option:
+class OptionInfo:
     def __init__(self, args):
-        print("option init internal", args)
+        # print("option init internal", args)
         self.label= args["label"]
         self.id = args["id"]
         self.command=""
@@ -43,13 +44,14 @@ class Option:
 
 class ModalInfo:
     def __init__(self, args):
-        print("modal init internal",args)
+        # print("modal init internal",args)
         self.title = args["title"]
-        self.name = args["name"]
+        self.id = args["id"]
         self.fields = {}
         self.submit_callback = ""
         self.next_node=""
         self.end = False
+        self.type = "modal"
         if "fields" in args:
             self.fields = args["fields"]
         if "submit_callback" in args:
