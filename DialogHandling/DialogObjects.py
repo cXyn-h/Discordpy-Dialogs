@@ -1,3 +1,5 @@
+#TODO: would base node class make things easier?
+
 class DialogInfo:
     def __init__(self, args):
         # print("dialog init internal",args)
@@ -14,6 +16,27 @@ class DialogInfo:
 
     def __repr__(self):
         return f"Dialog {self.id} prompt: {self.prompt}, options: {self.options}"
+
+class ReplyNodeInfo:
+    def __init__(self, args):
+        # print("dialog init internal",args)
+        self.id = args["id"]
+        self.prompt= ""
+        self.submit_callback = ""
+        self.next_node=""
+        self.end = False
+        self.type = "reply"
+        if "prompt" in args:
+            self.prompt = args["prompt"]
+        if "submit_callback" in args:
+            self.submit_callback = args["submit_callback"]
+        if "next_node" in args:
+            self.next_node = args["next_node"]
+        if "end" in args:
+            self.end = args["end"]
+
+    def __repr__(self):
+        return f"Reply {self.id} prompt: {self.prompt}"
 
 #TODO: discord ui elements styles can be defined in yaml files
 class OptionInfo:

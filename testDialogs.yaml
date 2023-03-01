@@ -65,3 +65,22 @@
     - label: "name"
       id: "questionairre_name"
   submit_callback: "submit_results"
+---
+- type: "dialog"
+  id: "sendMRStart"
+  prompt: "start?"
+  options:
+    - id: "startMR"
+      label: "yes"
+      flag: "aeri"
+      next_node: "waitMR"
+- type: "reply"
+  id: "waitMR"
+  prompt: "please type something in chat"
+  next_node: "endMR"
+- type: "dialog"
+  id: "endMR"
+  prompt: "done?"
+  options:
+    - id: "doneMR"
+      label: "yes"

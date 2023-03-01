@@ -10,7 +10,7 @@ from DialogHandling.DialogObjects import *
 #TODO: support different ways to show options to select from?
 #       support dropdown selection menus elements
 #       option to not send as interactable buttons/selectors - such as wait for image reply
-#TODO: implement save and load data about what's in progress
+#TODO: implement save and load stored data about what's in progress
 #       otherwise it currently leaves hanging buttons on previous messages that were sent before restart
 #TODO: handle view timeouts better, save data isn't cleaned up, but is that needed?
 #TODO: handle interaction needs to check in with active listeners and if that now needs to be deactivated 
@@ -19,7 +19,13 @@ from DialogHandling.DialogObjects import *
 #TODO: Figure out what sorts of data get passed into callbacks
 #       currently: dialog callbacks won't have progress or interaction ones
 #       callbacks from interactions hve interaction, and progress if data has been added
-#TODO: filters for who can interaction with nodes
+#TODO: filters for who can interact with nodes for other types of nodes, also more advanced filters
+#TODO: switching where next message will be sent
+#TODO: apparently created modals don't get garbage collected once they're submitted, it only seems to happen once the program ends
+#TODO: support flag and data for reply and modal nodes?
+#TODO: really weird behavior where multiple dialog messages that go into same node with save data are active at once, if you click those nodes not any of new ones cause steps to skip
+#TODO: custom defined nodes?
+#TODO: program-makes-a-choice-instead-of-waiting-for-user node
 
 class DialogHandler():
     # passing in dialogs and callbacks if you want them shared between instances. not tested yet
@@ -36,7 +42,14 @@ class DialogHandler():
         # this dialog might not be used in future
         self.nodes["default_completed"] = self.parse_node({"id":"default_completed", "prompt":"completed"})
 
+    '''################################################################################################
+    #
+    # LOAD FROM FILE METHODS
+    #
+    ################################################################################################'''
+
     def parse_node(self, yaml_node):
+        '''creates and returns the Info object for each node. raises exception when data is missing'''
         #TODO: more edgecase and format guards for loading files
         if (not "id" in yaml_node):
             # basically all loaded nodes must have a id
@@ -62,6 +75,16 @@ class DialogHandler():
                     # note, temporarily using option class because it has all the parameters needed already
                     fields[yaml_field["id"]] = OptionInfo(yaml_field)
             return ModalInfo({**yaml_node, "fields":fields})
+
+        elif "type" in yaml_node and yaml_node["type"] == "reply":
+            if "next_node" in yaml_node and (not type(yaml_node["next_node"]) is str):
+                self.nodes[yaml_node["next_node"]["id"]] = self.parse_node(yaml_node["next_node"])
+                if yaml_node["next_node"]["id"] == yaml_node["id"]:
+                    # edge case where the next node of this option can try to define the same node currently in the middle of being loaded. 
+                    #       loops are allowed but redefining not. currently would get overwritten by parse node later
+                    print("warning, bad format. reply node", yaml_node["id"],"next node is redefining node currently being parsed. will be overwritten once parsing is done")
+                yaml_node["next_node"] = yaml_node["next_node"]["id"]
+            return ReplyNodeInfo(yaml_node)
         else:
             # assuming if not labeled or otherwise labeled incorrectly, is a dialog. 
             if (not "prompt" in yaml_node):
@@ -149,13 +172,48 @@ class DialogHandler():
                 self.callbacks[command_name](open_dialog=kwargs["open_dialog"], 
                         progress=kwargs["progress"] if "progress" in kwargs else None, 
                         interaction=kwargs["interaction"]if "interaction" in kwargs else None)
+    
+    def print_detailed_saved_data(self):
+        '''only for debugging purposes. prints out long form information about stored state'''
+        indent = "   "
+        if len(self.active_listeners) > 0:
+            print(indent, "recorded nodes awaiting responses")
+            for node_message_id, save in self.active_listeners.items():
+                if node_message_id == "modals":
+                    for modal_message_id, modal_data in save.items():
+                        print(indent, indent, "msg id", modal_message_id, "node", modal_data["modal"].node_name, "type: modal", modal_data["modal"].is_finished())
+                else:
+                    print(indent, indent, "msg id", node_message_id, "node", save["node_name"])
+        else:
+            print(indent, "no recorded nodes awaiting responses")
+        
+        if len(self.flow_progress) > 0:
+            print(indent, "recorded save progress")
+            for k,v in self.flow_progress.items():
+                print(indent, indent, k, v.keys())
+        else:
+            print(indent, "no recorded flow progress")
+
+    def print_compact_saved_data(self):
+        '''only for debugging purposes. prints out a more compact form information about stored state'''
+        open_dialog_info = ", ".join(["{id:"+str(message_id)+ " dialog:"+save["node_name"]+"}" for message_id, save in self.active_listeners.items() if message_id != "modals"])
+        print("non modal nodes awaiting responses", open_dialog_info)
+        open_dialog_info = ", ".join(["{id:"+str(message_id)+ " dialog:"+save["node_name"]+"}" for message_id, save in self.active_listeners["modals"].items()])
+        print("modal nodes awaiting responses (this one is a bit bugged)", open_dialog_info)
+        print("open flow progress", self.flow_progress.keys())
+
+
+    '''################################################################################################
+    #
+    # SENDING NODES METHODS
+    #
+    ################################################################################################'''
 
     # Likely not using in future. Also want to manage rest of sending and taking care of callbacks/data when sending new dialog so this doesn't cover enough
     # def register_open_dialog(self, message, dialog_name, view, data={}):
     #     self.message_status[message.id] = {**data, "dialog_name":dialog_name, "message":message, "view":view}
     
-    #TODO: interaction response calls require a wrapper for this, is that a good solution? otherwise it works for responding to text and to interactions
-    async def send_dialog(self, send_method, dialog_name, send_options={}):
+    async def send_dialog(self, dialog_id, interaction_msg_or_context, passed_in_type, msg_options={}):
         '''
         When you need to send a new message that contains dialog with options to choose. Handles sending, tracking, and dialog callbacks
         Parem
@@ -164,58 +222,108 @@ class DialogHandler():
             reference to function to call to send a message. should already point to destination, and message and other options can be passed in.
             Must return the resulting message that was just sent, so if its an interaction response use the wrapper in this file
         '''
+        print("dialog handler start of send dialog", "dialog name", dialog_id)
+        self.print_detailed_saved_data()
         #TODO: add option to add data to dialog objects, data only saved with the message, not passed into the saved progress
-        dialog = self.nodes[dialog_name]
+        dialog = self.nodes[dialog_id]
+        send_method = interaction_send_message_wrapper(interaction_msg_or_context) \
+                        if passed_in_type == "interaction" else interaction_msg_or_context.channel.send
         #TODO: handle edge cases of 0, 1, > number of button slots options
         if len(dialog.options) > 0:
-            view = DialogView(self, dialog_name)
-            dialog_message = await send_method(content=dialog.prompt, view=view, **send_options)
+            view = DialogView(self, dialog_id)
+            dialog_message = await send_method(content=dialog.prompt, view=view, **msg_options)
             view.mark_message(dialog_message)
-            self.active_listeners[dialog_message.id] = {"dialog_name": dialog_name, "view":view, "message":dialog_message}
+            self.active_listeners[dialog_message.id] = {"node_name": dialog_id, "view":view, "message":dialog_message}
         else:
             # not clear how to handle only one option listed 
-            dialog_message = await send_method(content=dialog.prompt, **send_options)
-            self.active_listeners[dialog_message.id] = {"dialog_name": dialog_name, "view":None, "message":dialog_message}
+            dialog_message = await send_method(content=dialog.prompt, **msg_options)
+            self.active_listeners[dialog_message.id] = {"node_name": dialog_id, "view":None, "message":dialog_message}
 
-        open_dialog_info = ", ".join(["{ id:"+str(message_id)+ " dialog:"+save["dialog_name"]+"}" for message_id, save in self.active_listeners.items()])
-        print("dialog handler send dialog middle", "dialog message id", dialog_message.id, "dialog name", dialog_name, "is there a view", self.active_listeners[dialog_message.id]["view"], " all open dialogs", open_dialog_info)
+        print("dialog handler send dialog middle, after sending dialog and noting it is awaiting response")
+        self.print_detailed_saved_data()
 
         # do the command for the dialog
         if dialog.command:
-            await self.execute_command_callback(dialog.command, open_dialog=self.active_listeners[dialog_message.id])
+            await self.execute_command_callback(dialog.command, open_dialog=self.active_listeners[dialog_message.id] if dialog_message.id in self.active_listeners else {})
 
         # if there are fewer than 1, then we really aren't waiting for a choice to be made so dialog not really open anymore.
         #TODO: maybe don't even do this dance of adding and removing for the callback if there aren't any options? why would this be needed?
         if len(dialog.options) < 1:
-            del self.active_listeners[dialog_message.id]
-        open_dialog_info = ", ".join(["{ id:"+str(message_id)+ " dialog:"+save["dialog_name"]+"}" for message_id, save in self.active_listeners.items()])
-        print("dialog handler end of send dialog internal", "open dialog message ids", open_dialog_info)
+            await self.close_node(dialog_message.id, "dialog")
+        print("dialog handler end of send dialog")
+        self.print_detailed_saved_data()
         return dialog_message
 
     # thinking needed a separate method for this but seems still simple one line thing so it's still in handle interaction
-    async def send_modal(self, node_name, interaction):
-        pass
+    async def send_modal(self, node_id, interaction):
+        print("dialog handler start of send modal", node_id)
+        self.print_detailed_saved_data()
+        modal = DialogModal(self, node_id)
 
-    async def do_node_action(self, node_name, interaction_or_context, msg_opts = {}):
-        #TODO: this has a lot of spaghetti mess thoughts around format. very WIP
-        node_info = self.nodes[node_name]
-        if isinstance(node_info, DialogInfo):
-            await self.send_dialog(
-                    interaction_send_message_wrapper(interaction_or_context) 
-                        if issubclass(interaction_or_context, Interaction) else interaction_or_context,
-                    node_name, 
-                    msg_opts)
+        await interaction.response.send_modal(modal)
+
+        if "modals" not in self.active_listeners:
+            # message id for button interactions seem to be message the button is on, which can conflict with recorded info for dialog nodes
+            # so I guess seperate section for modals?
+            self.active_listeners["modals"] = {}
+        if interaction.message.id in self.active_listeners["modals"]:
+            # dialogs are always new message so don't need this check. modals can be triggered by a message that stays and thus be re-added
+            await self.close_node(interaction.message.id, "modal")
+            print("send modal found modal already existed for this message id", interaction.message.id, "it is now replaced")
+        self.active_listeners["modals"][interaction.message.id] = {"node_name":node_id, "modal":modal, "message":interaction.message}
+        print("end of send modal")
+        self.print_detailed_saved_data()
+
+    async def send_reply_node(self, node_id, interaction_msg_or_context, passed_in_type, msg_opts={}):
+        print("dialog handler start of sending reply node", node_id)
+        self.print_detailed_saved_data()
+
+        reply_node_info = self.nodes[node_id]
+        msg_contents = reply_node_info.prompt if reply_node_info.prompt else "Please type response in chat"
+        send_method = interaction_send_message_wrapper(interaction_msg_or_context) if \
+                        passed_in_type == "interaction" else interaction_msg_or_context.channel.send
+        prompt_message = await send_method(content=msg_contents, **msg_opts)
+        #TODO: fancier filters
+        #TODO: need a timeout for waiting for replies?
+        #TODO: automatic add a cancel button? or allow options on the node?
+        self.active_listeners[prompt_message.id] = {"node_name": node_id, "message":prompt_message, "filters":{}}
+        if passed_in_type == "interaction":
+            self.active_listeners[prompt_message.id]["filters"].update({"channel":interaction_msg_or_context.channel.id, "user":interaction_msg_or_context.user.id})
         else:
-            pass
-        pass
+            self.active_listeners[prompt_message.id]["filters"].update({"channel":interaction_msg_or_context.channel.id, "user":interaction_msg_or_context.author.id})
+        print("end of sending reply node. recorded filters for this node", self.active_listeners[prompt_message.id]["filters"])
+        self.print_detailed_saved_data()
+
+    async def do_node_action(self, node_name, interaction_msg_or_context, msg_opts = {}, passed_in_type = None):
+        '''entry point for doing actions related to node itself'''
+        print("handler node action beginning")
+        if not passed_in_type:
+            # denote whether we were given an interaction obj to respond to and for context, context obj, or message obj for chaining.
+            # having this passed around as well so this doesn't have to be recalculated
+            passed_in_type = "interaction" if issubclass(type(interaction_msg_or_context), Interaction) else ("message" if isinstance(interaction_msg_or_context, discord.Message) else "context")
+        node_info = self.nodes[node_name]
+
+        if node_info.type == "dialog":
+            await self.send_dialog(node_name, interaction_msg_or_context, passed_in_type, msg_opts)
+        elif node_info.type == "modal":
+            if not issubclass(type(interaction_msg_or_context), Interaction):
+                raise Exception("Invalid state. dialog handler next node is a modal, was passed a context when it must be an interaction")
+            await self.send_modal(node_name, interaction_msg_or_context)
+        elif node_info.type == "reply":
+            await self.send_reply_node(node_name, interaction_msg_or_context, passed_in_type)
+        print("'end of node action")
+
+    '''################################################################################################
+    #
+    # RESPONDING TO CHOICES AND CHAINING NODES
+    #
+    ################################################################################################'''
 
     async def handle_interaction(self, interaction):
         ''' handle clicks and interactions with message components on messages that are tracked as open dialogs. handles identifying which action it is, 
         callback for that interaction, and sending the next dialog in the flow'''
-        print("dialog handler start handling interaction", "interaction's message", interaction.message.id, "raw data in", interaction.data)
-        open_dialog_info = ", ".join(["{id:"+str(message_id)+ " dialog:"+save["dialog_name"]+"}" for message_id, save in self.active_listeners.items()])
-        print("dialog handler start handling interaction saved progress", self.flow_progress.keys(), "open dialogs", open_dialog_info)
-        print("dialog handler start handling interaction extras", interaction.extras)
+        print("dialog handler start handling interaction", "message", interaction.message.id, "raw data in", interaction.data, "interaction extras", interaction.extras)
+        self.print_detailed_saved_data()
 
         # grab information needed to handle interaction on any supported node type
         node_info = self.nodes[interaction.extras["node_name"]]
@@ -226,13 +334,15 @@ class DialogHandler():
         end_progress_transfer = None
         
         if interaction.type == InteractionType.modal_submit:
-            print("dialog handler modal submit branch")
+            print("handle interaction modal submit branch")
 
             if not (interaction.user.id, node_info.id) in self.flow_progress:
-                self.flow_progress[(interaction.user.id, node_info.id)] = {"node_name": node_info.id, "user":interaction.user, "type": "modal"}
+                self.flow_progress[(interaction.user.id, node_info.id)] = {"node_name": node_info.id, "user":interaction.user}
                 saved_progress = self.flow_progress[(interaction.user.id, node_info.id)]
             
-            self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"] = {}
+            self.flow_progress[(interaction.user.id, node_info.id)]["type"] = "modal"
+            if "modal_submits" not in self.flow_progress[(interaction.user.id, node_info.id)]:
+                self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"] = {}
             #TODO: saving modal submit information needs a bit of format finetuning
             self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"][node_info.id] = interaction.data["components"]
             print("dialog handler updated saved progres with modal submitted info", self.flow_progress[(interaction.user.id, node_info.id)]["modal_submits"])
@@ -245,31 +355,32 @@ class DialogHandler():
             next_node_name = node_info.next_node
             end_progress_transfer = node_info.end
             print("dialog hanlder finished modal submit branch")
+            self.print_detailed_saved_data()
         else:
             if not interaction.message.id in self.active_listeners:
                 return
-
             # grabbing dialog specific information
             chosen_option = node_info.options[interaction.data["custom_id"]]
-            print("found interaction on", "message", interaction.message.id, "is for dialog", node_info.id, "chosen option:", chosen_option, "dialog info", chosen_option.next_node)
+            print("found interaction on", "message", interaction.message.id, "is for dialog", node_info.id, "chosen option:", chosen_option, "next node info", chosen_option.next_node)
 
             # update saved data because any flags and data from an option applies when that option is chosen
             if chosen_option.data or chosen_option.flag:
                 # might not be any preexisting saved data, create it
                 if not (interaction.user.id, node_info.id) in self.flow_progress:
                     print("save data added for", (interaction.user.id, node_info.id), "because the option adds data")
-                    self.flow_progress[(interaction.user.id, node_info.id)] = {"node_name": node_info.id, "user":interaction.user, "type": "dialog"}
+                    self.flow_progress[(interaction.user.id, node_info.id)] = {"node_name": node_info.id, "user":interaction.user}
                     saved_progress = self.flow_progress[(interaction.user.id, node_info.id)]
                 else:
                     print("handle interaction found save data for", (interaction.user.id, node_info.id))
-
+                self.flow_progress[(interaction.user.id, node_info.id)]["type"] = "dialog"
                 if chosen_option.data:
                     if not "data" in saved_progress:
                         saved_progress["data"] = {}
                     saved_progress["data"].update(chosen_option.data)
                 if chosen_option.flag:
                     saved_progress["flag"] = chosen_option.flag
-            print("dialog handler handle interaction saved progress before callback", "this interaction progress", self.flow_progress[(interaction.user.id, node_info.id)].keys() if (interaction.user.id, node_info.id) in self.flow_progress else "NONE" , "all keys", self.flow_progress.keys())
+            print("dialog handler handle interaction saved progress before callback")
+            self.print_detailed_saved_data()
             
             # handling callback stage
             if chosen_option.command:
@@ -281,48 +392,135 @@ class DialogHandler():
             
             next_node_name = chosen_option.next_node
             end_progress_transfer = chosen_option.end
+
+        # # handling interaction response and wrapping up stage
+        await self.handle_chaining(node_info, next_node_name, end_progress_transfer, interaction, passed_in_type="interaction")
+        print("end handle interaction")
                         
-        # handling interaction response and wrapping up stage
+
+    async def handle_chaining(self, curr_node, next_node_id, end_progress_transfer, interaction_msg_or_context, passed_in_type=None):
+        print("started handling chaining from",curr_node.id, "to next node", next_node_id)
+        self.print_detailed_saved_data()
         #TODO: implementing different ways of finishing handling interaction. can be editing message, sending another message, or sending a modal
         #       would like to specify in yaml if edit or send new message to finish option, modals have been mostly implemented
         #TODO: better directing flow so that this can borrow a dialog from another dialog flow and stay on this one without needing to define a copy 
         #       of an existing dialog just so that we can go to a different dialog
-        if next_node_name in self.nodes:
-            next_node = self.nodes[next_node_name]
-            if isinstance(next_node, DialogInfo):
+        if not passed_in_type:
+            passed_in_type = "interaction" if issubclass(type(interaction_msg_or_context), Interaction) else ("message" if isinstance(interaction_msg_or_context, discord.Message) else "context")
+            
+        # set up variables to point to data since different incoming formats have different locations for data needed
+        curr_node_message = interaction_msg_or_context
+        if passed_in_type != "message":
+            curr_node_message = interaction_msg_or_context.message
+
+        if passed_in_type == "interaction":
+            user = interaction_msg_or_context.user
+        else:
+            user = interaction_msg_or_context.author
+
+        saved_progress = None
+        if (user.id, curr_node.id) in self.flow_progress:
+            saved_progress = self.flow_progress[(user.id, curr_node.id)]
+
+        # print("handling chaining, finding basic data","user id", user.id,"curr_node", curr_node.id, "saved progress", saved_progress.keys() if saved_progress else "NONE", "all saved flow", self.flow_progress.keys())
+        if next_node_id and not (next_node_id in self.nodes):
+            print("warning, tyring to chain from",curr_node.id,"to",next_node_id,"but next node not registered. ignoring and dropping for now, double check definitions.")
+
+        if next_node_id in self.nodes:
+            # next node is registered properly, means need to go to next node and deal with save data
+            next_node = self.nodes[next_node_id]
+            print("handling chaining, next node found","type", next_node.type)
+            if next_node.type == "dialog":
                 # TODO: assuming when need to progress is getting messy.
                 #       some dialogs branch and need to transfer data, others do not. the guessing so far supports a help 
                 #       button that prints out extra message, does not affect save state, and execute continues from message with help button
-                must_advance_progress = not end_progress_transfer and len(next_node.options) > 0
-                if saved_progress and interaction.message.id in self.active_listeners and len(self.nodes[next_node_name].options) > 0:
-                    await self.clean_clickables(self.active_listeners[interaction.message.id])
-                next_message = await self.send_dialog(interaction_send_message_wrapper(interaction), next_node_name)
+                if curr_node.type == "dialog" and saved_progress and curr_node_message.id in self.active_listeners and len(next_node.options) > 0:
+                    await self.clean_clickables(self.active_listeners[curr_node_message.id])
+                await self.do_node_action(next_node_id, interaction_msg_or_context)
                 # print("dialog handler end of handling interaction internal", interaction)
                 if saved_progress:
-                    if must_advance_progress:
-                        self.flow_progress[(interaction.user.id, next_node_name)] = {**self.flow_progress[(interaction.user.id, node_info.id)], "type":"dialog"}
-                        del self.flow_progress[(interaction.user.id, node_info.id)]
-            elif isinstance(next_node, ModalInfo):
-                await interaction.response.send_modal(DialogModal(self, next_node_name))
+                    if not end_progress_transfer and len(next_node.options) > 0:
+                        print("next node is dialog, and save data needs to be progressed")
+                        self.flow_progress[(user.id, next_node_id)] = {**self.flow_progress[(user.id, curr_node.id)], "type":"dialog"}
+                        del self.flow_progress[(user.id, curr_node.id)]
+                    if end_progress_transfer:
+                        del self.flow_progress[(user.id, curr_node.id)]
+            elif next_node.type == "modal" or next_node.type == "reply":
+                if curr_node.type == "dialog" and saved_progress and curr_node_message.id in self.active_listeners:
+                    await self.clean_clickables(self.active_listeners[curr_node_message.id])
+                await self.do_node_action(next_node_id, interaction_msg_or_context)
                 if saved_progress:
                     if not end_progress_transfer:
-                        self.flow_progress[(interaction.user.id, next_node_name)] = self.flow_progress[(interaction.user.id,node_info.id)]
-                        self.flow_progress[(interaction.user.id, next_node_name)]["type"] = "modal"
-                    del self.flow_progress[(interaction.user.id,node_info.id)]
+                        self.flow_progress[(user.id, next_node_id)] = self.flow_progress[(user.id, curr_node.id)]
+                        self.flow_progress[(user.id, next_node_id)]["type"] = next_node.type
+                    del self.flow_progress[(user.id, curr_node.id)]
         else:
             # no next node, end of line so clean up
-            await interaction.response.send_message(content="interaction completed", ephemeral=True)
+            print("handling chaining, no next node.")
+            if passed_in_type == "interaction":
+                await interaction_msg_or_context.response.send_message(content="interaction completed", ephemeral=True)
             if saved_progress:
-                if interaction.message.id in self.active_listeners:
-                    await self.clean_clickables(self.active_listeners[interaction.message.id])
-                del self.flow_progress[(interaction.user.id, node_info.id)]
-        open_dialog_info = ", ".join(["{ id:"+str(message_id)+ " dialog:"+save["dialog_name"]+"}" for message_id, save in self.active_listeners.items()])
-        print("dialog handler end of handling interaction internal", "open dialogs", open_dialog_info, "saved progress", self.flow_progress.keys())
+                    if curr_node.type == "dialog" and curr_node_message.id in self.active_listeners:
+                        await self.clean_clickables(self.active_listeners[curr_node_message.id])
+                    del self.flow_progress[(user.id, curr_node.id)]
 
-        # final net for catching
-        if not interaction.response.is_done():
-            print("dialog handler handle interaction final net somehow reached")
-            await interaction.response.send_message(content="interaction completed", ephemeral=True)
+        # final net for catching interactions to make it less confusing for user
+        if passed_in_type == "interaction" and not interaction_msg_or_context.response.is_done():
+            print("dialog handler handle chaining final net somehow reached", "node", curr_node.id)
+            await interaction_msg_or_context.response.send_message(content="interaction completed", ephemeral=True)
+        print("dialog handler after chaining saved progress")
+        self.print_detailed_saved_data()
+
+    async def on_message(self, message: discord.Message):
+        print("start on message in dialog handler", message.content)
+        # first step is fintering for messages that are the answers to reply nodes. only ones we care about here
+        found_node_id = None
+        node_message = None
+        for listener in self.active_listeners.values():
+            # print("active filter","node", listener["node_name"], "node type", self.nodes[listener["node_name"]].type, listener.keys())
+            # active listeners may have entries for different types of nodes that are waiting for events.
+            # only reply nodes matter here and they have a filters field stored
+            if not "filters" in listener:
+                continue
+
+            if message.author.id == listener["filters"]["user"] and message.channel.id == listener["filters"]["channel"]:
+                found_node_id = listener["node_name"]
+                node_message = listener["message"]
+                break
+
+        # finished looking, either found the message fulfills a node's conditions or failed to find any 
+        if not found_node_id:
+            return
+        print("on message found message", message.id, "is a reply to a reply node. saved progress")
+        self.print_detailed_saved_data()
+
+        # handle all actions about saving info and moving onto next step
+        node_info = self.nodes[found_node_id]
+
+        # assuming information sent via reply is like a form submit and should immediately be saved
+        if not (message.author.id, node_info.id) in self.flow_progress:
+            self.flow_progress[(message.author.id, node_info.id)] = {"node_name": node_info.id, "user":message.author}
+        saved_progress = self.flow_progress[(message.author.id, node_info.id)]
+        saved_progress["type"] = "reply"
+        if "reply_submits" not in saved_progress:
+            saved_progress["reply_submits"] = {}
+        #TODO: handle what happens during overwrite of this. probably is possible if you leave a dialog node that leads to this with its buttons there
+        #       and keep hitting the button instead of replying? Becuase of for loop setup, if there's multiple reply nodes, they are handled one at a time
+        saved_progress["reply_submits"][found_node_id] = message
+
+        if node_info.submit_callback and node_info.submit_callback in self.callbacks:
+            await self.execute_command_callback(node_info.submit_callback, 
+                    open_dialog=self.active_listeners[node_message.id], 
+                    progress=saved_progress, 
+                    interaction=None)
+        
+        await self.handle_chaining(node_info, node_info.next_node, node_info.end, message)
+
+        # assuming once there's one reply then this node is done listening, maybe fancier stuff like waiting for multiple replies in future
+        await self.close_node(node_message.id, "reply", fulfilled=True)
+
+        print("end of on message handling reply to node")
+        self.print_detailed_saved_data()
 
     async def clean_clickables(self, open_dialog=None, progress=None, interaction=None):
         # print("clean clickables, passed in dialog", open_dialog)
@@ -333,16 +531,48 @@ class DialogHandler():
         # del self.message_status[data["message"].id]
 
     async def close_dialog(self, message_id):
-        '''removes interaction buttons from message to prevent further interactions starting from this dialog message'''
+        '''depreacted, use close_node. removes interaction buttons from message to prevent further interactions starting from this dialog message'''
         #TODO: error edgecase handling
         #       View already expired/not there
         if message_id in self.active_listeners:
             data = self.active_listeners[message_id]
-            print("Dialog Handler close dialog internal", "message", message_id, "for dialog", data["dialog_name"])
+            print("Dialog Handler close dialog internal", "message", message_id, "for dialog", data["node_name"])
             view = data["view"]
             view.clear_items()
             await data["message"].edit(view=view)
             del self.active_listeners[message_id]
+
+    async def close_node(self, active_listner_key, node_type, fulfilled=True):
+        '''closes an open (ie waiting for data) instance of a node. removes any tracking data about it from stores 
+        and modifies message in Discord if needed   
+        conceptually, nodes defined in yaml create blueprint of a graph to travel, a sent message becomes instance of someone traversing
+        that graph. closing instances is stopping person from walking not modifying graph.
+
+        Parameters
+        ---
+        active_listner_key
+            the key to access node data in stored active nodes. currently ususally message id
+        fulfilled
+            whether or not node was completed when it was closed. Can be used to differentiate what to show in those different cases.
+            mostly used only for editing prompt of reply node to say "sorry we're closed" if it closed before reply was made
+        '''
+        #TODO: maybe clean up flow progress as well?
+        if node_type == "dialog":
+            if active_listner_key in self.active_listeners:
+                node_data = self.active_listeners[active_listner_key]
+                view = node_data["view"]
+                if view:
+                    view.clear_items()
+                    await node_data["message"].edit(view=view)
+                del self.active_listeners[active_listner_key]
+        elif node_type == "modal":
+            if ["modals"] in self.active_listeners and active_listner_key in self.active_listeners["modals"]:
+                del self.active_listeners["modals"][active_listner_key]
+        elif node_type == "reply":
+            node_data = self.active_listeners[active_listner_key]
+            if not fulfilled:
+                await node_data["message"].edit(content="responses are closed")
+            del self.active_listeners[active_listner_key]
 
 # since the interaction send_message doesn't return message that was sent by default, wrapper to get that behavior to be same as channel.send()
 def interaction_send_message_wrapper(interaction):
@@ -369,12 +599,12 @@ class DialogView(ui.View):
     async def on_timeout(self):
         print("Dialog view on timeout callback internal")
         await super().on_timeout()
-        await self.dialog_handler.close_dialog(self.message.id)
+        await self.dialog_handler.close_node(self.message.id, "dialog")
 
     async def stop(self):
         print("Dialog view stop internal")
         super().stop()
-        await self.dialog_handler.close_dialog(self.message.id)
+        await self.dialog_handler.close_node(self.message.id, "dialog")
 
 class DialogButton(ui.Button):
 
@@ -384,14 +614,14 @@ class DialogButton(ui.Button):
         self.dialog_handler = handler
 
     async def callback(self, interaction):
-        print("Dialog button clicked", "message id", interaction.message.id, "raw data in", interaction.data)
+        # print("Dialog button clicked", "message id", interaction.message.id, "raw data in", interaction.data)
         interaction.extras["node_name"] = self.view.node_name
         await self.dialog_handler.handle_interaction(interaction)
 
 class DialogSelect(ui.Select):
 
     def __init__(self, handler, **kwargs):
-        print("DialogSelect init internal", kwargs)
+        # print("DialogSelect init", kwargs)
         super().__init__(**kwargs)
         self.dialog_handler = handler
 
@@ -421,12 +651,3 @@ class DialogModal(ui.Modal):
 async def submit_results(open_dialog=None, progress=None, interaction=None):
     #NOTE: VERY ROUGH RESULT MESSAGE JUST FOR PROOF OF CONCEPT THAT DATA WAS STORED. MUST BE EDITED ONCE FORMAT IS FINALIZED (yes its messy)
     await interaction.channel.send("questionairre received "+progress["modal_submits"]["questionairreModal"][0]["components"][0]["value"])
-
-
-#testing pop up modals. copied from docs. this one allows clicker to input information. has to be done in response to interactions
-class Questionnaire(ui.Modal, title='Questionnaire Response'):
-    name = ui.TextInput(label='Name')
-    answer = ui.TextInput(label='Potato', style=discord.TextStyle.paragraph)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.send_message(f'Thanks for your response, {self.name}!', ephemeral=True)
