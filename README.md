@@ -9,14 +9,16 @@ This project reads the token for connecting to Discord from config.json. After c
     token: "PASTE_TOKEN_BETWEEN_QUOTES"
 }
 ```
-run main.py to have a simple bot with a pre loaded test dialog. Start dialog by sending `!test` in a server channel
+run main.py to have a simple bot with a pre loaded dialog flow with responses with button choices and a modal form. Start dialog by sending `!test` in a server channel
+For the reply nodes, a simple test to make sure responses are received and next node is sent is triggered with `!testmr`. see terminal printout for changes to saved data, since the formatting for submitted information is WIP.
 
 
 ## Adding to other bots
-DialogHandler will need to be instantiated. Any methods that need to start a dialog need to be able to reference the handler object. Making a field of the bot like in the example works well.
+DialogHandler will need to be instantiated. Any methods that need to start a dialog need to be able to reference the handler object. Making a field of the bot like in the example works well. Reply nodes require message Intent, since they wait for a sent message in channel. If those nodes are neded, add the intent first. Handler also needs to receive message events, so add the handler's on_message function as event listener or call it from bot's on_message.  
+From further testing, handler also has to listen to interaction events. 
 
 ## Creating Dialog yamls
-Dialogs are saved in yaml files. The example dialog flow is all defined in `testDialogs.yaml` and shows most all the different possible ways to create each of the items. Some terms first: A node is either a dialog or a modal and represents some action done and are now waiting for a choice to be made, currently only the user in chat can do this. Multiple nodes can be defined in one file, and multiple files loaded into one Handler. Here are the fields that need to be listed out in a yaml file.
+Dialogs are saved in yaml files. The example dialog flow is all defined in `testDialogs.yaml` and shows most all the different possible ways to create each of the items. Some terms first: A node is either a dialog or a modal and represents some action done and are now waiting for a choice to be made, currently only the user in chat can do this. Multiple nodes can be defined in one file (do this by listing each node as one element in list), and multiple files loaded into one Handler. Here are the fields that need to be listed out in a yaml file.
 
 ### Dialog Node
 A node that is a message in chat with the saved prompt as the content and displays a button for each option waiting for one to be clicked
