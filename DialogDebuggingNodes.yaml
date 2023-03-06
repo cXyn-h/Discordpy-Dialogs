@@ -1,0 +1,25 @@
+# this file is just for thourough setup of debugging possibilities
+- type: dialog
+  id: starter
+  prompt: 3
+  options:
+  - label: "ok"
+    id: d2d
+    next_node: middle
+    flag: teit
+  - label: "no"
+    id: d2d2
+- type: modal
+  id: middle
+  title: test Modal
+  fields:
+  - id: field1
+    label: field1
+  next_node: ender
+  flag: yyy
+- type: dialog
+  id: ender
+  prompt: "ender"
+  options:
+  - label: "ok"
+    id: enderok

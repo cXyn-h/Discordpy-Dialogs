@@ -21,6 +21,10 @@ async def test(ctx):
 async def testmr(ctx):
     await bot.dialog_handler.do_node_action("sendMRStart", ctx)
 
+@bot.command()
+async def debugnodes(ctx):
+    await bot.dialog_handler.do_node_action("starter", ctx)
+
 
 f = open("./config.json")
 config_ops = json.load(f)

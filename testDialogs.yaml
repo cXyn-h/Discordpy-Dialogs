@@ -64,6 +64,11 @@
   fields:
     - label: "name"
       id: "questionairre_name"
+      default_value: "gjierjgier"
+    - label: "what is the most interesting fact you know"
+      id: "questionairre_fact"
+      style: paragraph
+      placeholder: "somthingsomrthing"
   submit_callback: "submit_results"
 ---
 - type: "dialog"
