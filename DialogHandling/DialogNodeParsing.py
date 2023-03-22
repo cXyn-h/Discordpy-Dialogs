@@ -2,12 +2,16 @@
     different formatting from what comes in. only parse_node is meant to be called from outside this file'''
 from DialogHandling.DialogObjects import *
 from discord import TextStyle
+from DialogHandling.BuiltinNodeDefinitions.DialogNode import DialogLayout
+from DialogHandling.BuiltinNodeDefinitions.ModalNode import ModalLayout
+from DialogHandling.BuiltinNodeDefinitions.MessageReplyNode import ReplyLayout
 
-# node_types={"dialog":DialogInfo, "modal":ModalInfo, "reply":ReplyNodeInfo}
-node_types = ["dialog", "modal", "reply"]
+node_types={"dialog":DialogLayout, "modal":ModalLayout, "reply":ReplyLayout}
+# node_types = ["dialog", "modal", "reply"]
 
-#TODO: extensive testing of this and format guards
-#TODO: forbid reply to modal transition, and other impossible overarching stuff
+#TODO: soon: extensive testing of this and format guards
+#TODO: soon: forbid reply to modal transition, and other impossible overarching stuff
+#TODO: soon: abstracting the parsing
 
 def parse_node(yaml_node):
     '''creates the Info object for node, and any defined nested inside this node. raises exception when data is missing
@@ -23,10 +27,10 @@ def parse_node(yaml_node):
 
     node_type = "dialog"
     if "type" in yaml_node:
-        if not yaml_node["type"] in node_types:
+        if not yaml_node["type"] in node_types.keys():
             raise Exception("unkown type for node "+ yaml_node["id"]+" defintion: "+ str(yaml_node) if len(str(yaml_node)) < 70 else str(yaml_node)[:35]+ "..."+str(yaml_node)[-35:])
         node_type = yaml_node["type"]
-    
+    #TODO: immediate: move parsing details into each node, make this abstract
     # yaml definition needs a type flag to specify if it is not a dialog node
     if node_type == "modal":
         if (not "title" in yaml_node):
@@ -58,14 +62,14 @@ def parse_node(yaml_node):
             next_id, next_nested_nodes = parse_next_node_field(yaml_node["next_node"])
             nested_definitions.extend(next_nested_nodes)
             yaml_node["next_node"] = next_id
-        return (ModalInfo({**yaml_node, "fields":fields}), nested_definitions)
+        return (ModalLayout({**yaml_node, "fields":fields}), nested_definitions)
 
     elif node_type == "reply":
         if "next_node" in yaml_node:
             next_id, next_nested_nodes = parse_next_node_field(yaml_node["next_node"])
             nested_definitions.extend(next_nested_nodes)
             yaml_node["next_node"] = next_id
-        return (ReplyNodeInfo(yaml_node),nested_definitions)
+        return (ReplyLayout(yaml_node),nested_definitions)
     else:
         # assuming if not labeled or otherwise labeled incorrectly, is a dialog. 
         if (not "prompt" in yaml_node):
@@ -84,7 +88,7 @@ def parse_node(yaml_node):
                 if loaded_option.id in options:
                     raise Exception("option \""+loaded_option.id+"\" already defined for dialog node \""+yaml_node["id"]+"\"")
                 options[loaded_option.id] = loaded_option
-        return (DialogInfo({**yaml_node, "options":options}), nested_definitions)
+        return (DialogLayout({**yaml_node, "options":options}), nested_definitions)
 
 def parse_option_field(yaml_option, yaml_parent_dialog):
     ''' creates and returns OptionInfo object to hold option data. raises exceptions when data is missing and adds 

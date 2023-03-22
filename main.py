@@ -15,15 +15,15 @@ async def on_message(message: discord.Message):
 
 @bot.command()
 async def test(ctx):
-    await bot.dialog_handler.do_node_action("welcome", ctx)
+    await bot.dialog_handler.start_at("welcome", ctx)
 
 @bot.command()
 async def testmr(ctx):
-    await bot.dialog_handler.do_node_action("sendMRStart", ctx)
+    await bot.dialog_handler.start_at("sendMRStart", ctx)
 
 @bot.command()
 async def debugnodes(ctx):
-    await bot.dialog_handler.do_node_action("starter", ctx)
+    await bot.dialog_handler.start_at("starter", ctx)
 
 
 f = open("./config.json")
