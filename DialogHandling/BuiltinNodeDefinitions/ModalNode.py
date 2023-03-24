@@ -1,8 +1,12 @@
 import DialogHandling.DialogHandler as DialogHandler
-from discord import ComponentType
+from discord import ComponentType, TextStyle
+import DialogHandling.DialogObjects as DialogObjects
+import DialogHandling.DialogNodeParsing as DialogNodeParsing
+
 class ModalLayout:
     required_input=["id", "title"]
     optional_input=["fields", "submit_callback", "next_node", "end"]
+    type = "modal"
     def __init__(self, args):
         # print("modal init internal",args)
         self.title = args["title"]
@@ -13,7 +17,6 @@ class ModalLayout:
         self.flag=""
         self.data={}
         self.end = False
-        self.type = "modal"
         if "fields" in args:
             self.fields = args["fields"]
         if "submit_callback" in args:
@@ -32,6 +35,39 @@ class ModalLayout:
         modal = DialogHandler.DialogModal(handler, self.id)
         await interaction.response.send_modal(modal)
         return ModalNode(self, interaction, save_data, channel_message = interaction.message, modal=modal)
+    
+    @classmethod
+    def parse_node(cls, yaml_node):
+        if (not "title" in yaml_node):
+            # basically all modals must have a separate title to display to all interacters
+            raise Exception("modal node missing title "+str(yaml_node))
+        
+        if "options" in yaml_node:
+            print("modal node", yaml_node["id"],"definition has options defined in it. Note this will be ignored")
+
+        nested_definitions = []
+        fields = {}
+        if "fields" in yaml_node:
+            for yaml_field in yaml_node["fields"]:
+                if (not "label" in yaml_field) or (not "id" in yaml_field):
+                    raise Exception("modal node \""+yaml_node["id"]+"\" has mis formed field" + yaml_field )
+                if yaml_field["id"] in fields:
+                    raise Exception("field \""+yaml_field["id"]+"\" already defined for modal node \"" + yaml_node["id"] + "\"")
+                if "style" in yaml_field:
+                    if yaml_field["style"] == "paragraph":
+                        yaml_field["style"] = TextStyle.paragraph
+                    elif yaml_field["style"] == "long":
+                        yaml_field["style"] = TextStyle.paragraph
+                    else:
+                        yaml_field["style"] = TextStyle.short
+                fields[yaml_field["id"]] = DialogObjects.ModalFieldInfo(yaml_field)
+        if len(fields) < 1 or len(fields) > 5:
+            raise Exception(f"modal {yaml_node['id']} has wrong number of fields, must be between 1 and 5, but currently has {len(fields)}")
+        
+        if "next_node" in yaml_node:
+            next_id, nested_definitions = DialogNodeParsing.parse_next_node_field(yaml_node["next_node"])
+            yaml_node["next_node"] = next_id
+        return (ModalLayout({**yaml_node, "fields":fields}), nested_definitions)
 
 class ModalNode:
     def __init__(self, layout_node, interaction, save_data=None, channel_message=None, modal=None):

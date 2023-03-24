@@ -1,7 +1,10 @@
 import DialogHandling.DialogHandler as DialogHandler
+import DialogHandling.DialogNodeParsing as DialogNodeParsing
+
 class DialogLayout:
     required_input=["id"]
     optional_input=["prompt", "command", "options"]
+    type = "dialog"
     def __init__(self, args):
         # print("dialog init internal",args)
         self.id = args["id"]
@@ -9,7 +12,6 @@ class DialogLayout:
         self.prompt= args["prompt"]
         self.command=""
         self.options={}
-        self.type = "dialog"
         if "options" in args:
             self.options = args["options"]
         if "command" in args:
@@ -28,6 +30,26 @@ class DialogLayout:
             # no options to choose from, meaning no waiting
             dialog_message = await send_method(content=self.prompt, **msg_options)
             return DialogNode(self, save_data, channel_message=dialog_message)
+        
+    @classmethod
+    def parse_node(cls, yaml_node):
+        if (not "prompt" in yaml_node):
+            # currently requiring all dialog nodes need a prompt
+            raise Exception("dialog node missing prompt: "+ str(yaml_node))
+        
+        if "fields" in yaml_node:
+            print("dialog node definition has fields defined in it. Note this will be ignored")
+
+        nested_definitions = []
+        options = {}
+        # ensure any options for this dialog are loaded correctly before saving dialog
+        if "options" in yaml_node:
+            for yaml_option in yaml_node["options"]:
+                loaded_option, nested_definitions = DialogNodeParsing.parse_option_field(yaml_option, yaml_node)
+                if loaded_option.id in options:
+                    raise Exception("option \""+loaded_option.id+"\" already defined for dialog node \""+yaml_node["id"]+"\"")
+                options[loaded_option.id] = loaded_option
+        return (DialogLayout({**yaml_node, "options":options}), nested_definitions)
 
     def __repr__(self):
         return f"Dialog {self.id} prompt: {self.prompt}, options: {self.options}"

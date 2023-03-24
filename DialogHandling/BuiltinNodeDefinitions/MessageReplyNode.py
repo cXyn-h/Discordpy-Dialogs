@@ -1,7 +1,10 @@
 import DialogHandling.DialogHandler as DialogHandler
+import DialogHandling.DialogNodeParsing as DialogNodeParsing
+
 class ReplyLayout:
     required_input=["id"]
     optional_input=["prompt", "submit_callback", "next_node", "end"]
+    type = "reply"
     def __init__(self, args):
         # print("dialog init internal",args)
         self.id = args["id"]
@@ -11,7 +14,6 @@ class ReplyLayout:
         self.flag=""
         self.data={}
         self.end = False
-        self.type = "reply"
         if "prompt" in args:
             self.prompt = args["prompt"]
         if "submit_callback" in args:
@@ -31,6 +33,14 @@ class ReplyLayout:
         msg_contents = self.prompt if self.prompt else "Please type response in chat"
         prompt_message = await send_method(content=msg_contents, **msg_options)
         return ReplyNode(self, save_data, channel_message=prompt_message)
+    
+    @classmethod
+    def parse_node(cls, yaml_node):
+        nested_definitions = []
+        if "next_node" in yaml_node:
+            next_id, nested_definitions = DialogNodeParsing.parse_next_node_field(yaml_node["next_node"])
+            yaml_node["next_node"] = next_id
+        return (ReplyLayout(yaml_node),nested_definitions)
     
     def __repr__(self):
         return f"Reply {self.id} prompt: {self.prompt}"
