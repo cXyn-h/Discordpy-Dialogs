@@ -27,9 +27,9 @@ class ReplyLayout:
         if "end" in args:
             self.end = args["end"]
 
-    async def do_node(self, handler, save_data, interaction_msg_or_context, passed_in_type, msg_options={}):
+    async def do_node(self, handler, save_data, interaction_msg_or_context, event_object_class, msg_options={}):
         send_method = DialogHandler.interaction_send_message_wrapper(interaction_msg_or_context) \
-                        if passed_in_type == "interaction" else interaction_msg_or_context.channel.send
+                        if event_object_class == "interaction" else interaction_msg_or_context.channel.send
         msg_contents = self.prompt if self.prompt else "Please type response in chat"
         prompt_message = await send_method(content=msg_contents, **msg_options)
         return ReplyNode(self, save_data, channel_message=prompt_message)
@@ -90,6 +90,9 @@ class ReplyNode:
 
     async def get_chaining_info(self, message):
         return (self.layout_node.next_node, self.layout_node.end)
+    
+    async def post_chaining(self, chaining_status, next_node_layout):
+        pass
 
     async def can_close(self):
         return len(self.reply_messages) > 0

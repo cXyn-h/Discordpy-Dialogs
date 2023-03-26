@@ -58,6 +58,11 @@
     - label: "complete 3"
       id: "complete"
       end: True
+    - label: "help"
+      id: "help3"
+      next_node:
+        id: "help3"
+        prompt: "how to do step 3 throp[kjy[ktthm[oldml"
 - type: "modal"
   id: "questionairreModal"
   title: "simple test questions"

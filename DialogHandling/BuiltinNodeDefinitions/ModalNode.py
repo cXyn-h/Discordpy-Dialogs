@@ -31,7 +31,7 @@ class ModalLayout:
         if "end" in args:
             self.end = args["end"]
 
-    async def do_node(self, handler, save_data, interaction, passed_in_type, msg_options={}):
+    async def do_node(self, handler, save_data, interaction, event_object_class, msg_options={}):
         modal = DialogHandler.DialogModal(handler, self.id)
         await interaction.response.send_modal(modal)
         return ModalNode(self, interaction, save_data, channel_message = interaction.message, modal=modal)
@@ -110,6 +110,9 @@ class ModalNode:
     
     async def get_chaining_info(self, interaction):
         return (self.layout_node.next_node, self.layout_node.end)
+    
+    async def post_chaining(self, chaining_status, next_node_layout):
+        pass
     
     async def can_close(self):
         return self.replies > 0

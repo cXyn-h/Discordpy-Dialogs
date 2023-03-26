@@ -32,8 +32,11 @@ dialog_logger.setLevel(logging.INFO)
 #TODO: soon: wait-for-any-message-based-on-filters-doesn't-need-to-be-reply node
 #TODO: soon: using next step flag to indicate when one stage is completed might help?
 #TODO: soon: chaining, dealing with error of having node after flow progress is saved, and what happens when you re-enter that node with flow progress still active
-#TODO: soon: error handling for do node action
 #TODO: future: sweeps for cleaning up data
+#TODO: immediate: double checking user and node references used everywhere to verify events is correct. assumes that only one user per node. espcially the areas where
+#       grabbing user from save vs one that generated event
+#TODO: unknown: versioning yaml files
+#TODO: saved data handling more complex cases like appending entries to a dictionary in saved data
 
 class DialogHandler():
     # passing in dialogs and callbacks if you want them shared between instances. not tested yet
@@ -87,9 +90,12 @@ class DialogHandler():
         if func == self.register_dialog_callback:
             dialog_logger.warning("dialog handler tried registering the registration function, dropping for security reasions")
             return
+        dialog_logger.debug("registered callback <%s>", func)
         self.callbacks[func.__name__] = func
 
     async def execute_command_callback(self, command_name, **kwargs):
+        if not command_name:
+            return
         # refining this is on todo list at top of file
         if command_name in self.callbacks:
             dialog_logger.info("doing command callback, command name <%s>. from node or option callback is unkown", command_name)
@@ -102,7 +108,7 @@ class DialogHandler():
                         progress=kwargs["progress"] if "progress" in kwargs else None, 
                         interaction=kwargs["interaction"]if "interaction" in kwargs else None)
         else:
-            dialog_logger.error("callback name <%s> not found", command_name)
+            dialog_logger.error("doing command callback but callback name <%s> not found", command_name)
 
     '''################################################################################################
     #
@@ -176,7 +182,7 @@ class DialogHandler():
             event_object_class = "interaction" if issubclass(type(interaction_msg_or_context), Interaction) else ("message" if isinstance(interaction_msg_or_context, discord.Message) else "context")
         if not node_id in self.nodes:
             dialog_logger.warning("trying to do node <%s> action but it is not laoded. skipping", node_id)
-            return
+            return 0
         node_layout = self.nodes[node_id]
         try:
             active_node = await node_layout.do_node(self, save_data, interaction_msg_or_context, event_object_class, msg_opts)
@@ -208,6 +214,7 @@ class DialogHandler():
 
         if len(active_node.waits) == 0:
             # immediate closeing node since if it isn't waiting on anything it isn't active
+            dialog_logger.info("immediate closing of node <%s> after doing it because it isn't actively waiting for anything", node_layout.id)
             await self.close_node(active_node)
         dialog_logger.info("end of node action node id <%s>", node_id)
         return 1
@@ -304,12 +311,35 @@ class DialogHandler():
         `prev_save_progress` - optional dict
             if there's save data that should be attached to node that is about to be created
         """
-        await self.goto_node(node_id, False, prev_save_progress, interaction_msg_or_context)
+        event_object_class = "interaction" if issubclass(type(interaction_msg_or_context), Interaction) else ("message" if isinstance(interaction_msg_or_context, discord.Message) else "context")
+
+        goto_status = await self.goto_node(node_id, False, prev_save_progress, interaction_msg_or_context, event_object_class=event_object_class)
+        if goto_status < 0:
+            dialog_logger.warning("trying to start at node <%s> but failed when trying to do so", node_id)
+            if event_object_class == "interaction" and not interaction_msg_or_context.response.is_done():
+                await interaction_msg_or_context.response.send_message(content="can't start dialog", ephemeral=True)
+            else:
+                await interaction_msg_or_context.channel.send(content="can't start dialog")
 
     async def goto_node(self, next_node_id, end_progress_transfer, save_data, interaction_msg_or_context, event_object_class=None):
+        '''goes to the passed in next node by doing the node action and advancing any passed in save data. Exceptions from doing node are handled
+        but all methods that call this are expected to handle logic for different cases of failure how it needs.
+        
+       Returns
+       --- 
+        uses return codes to report results:
+        * -3 next_node_id specified but failed to do next node's actions. any passed in save data is not changed or stored in 
+        nodes/handler's central storage
+        * -2 next_node_id specified but previous save progress found and blocking chaining
+        * -1 next_node_id specified but not properly loaded
+        * 0 no next node specified
+        * 1 next node was successfully handled and save data transferred
+        * 2 next node was successfully handled and no save data or was not meant to be transferred'''
+        rc = 0
         if not event_object_class:
             event_object_class = "interaction" if issubclass(type(interaction_msg_or_context), Interaction) else ("message" if isinstance(interaction_msg_or_context, discord.Message) else "context")
         
+        # because the way to access this is different, get a reference that is abstracted
         if event_object_class == "interaction":
             interacting_user = interaction_msg_or_context.user
         else:
@@ -322,28 +352,43 @@ class DialogHandler():
                 # pass through node. Could get confusing and cause unexpected behavior so check to prevent that. alpha2.0 has active nodes link to flow
                 # progress so might not be as needed to centrally store and check for repeats as each attempt can have separate data objects
                 # if previous save data takes this path and moves to trying to clean up nodes part
-                pass
+                rc = -2
             else:
+                # its also ok to go ahead and chain to next node 
                 next_node_layout = self.nodes[next_node_id]
                 if not end_progress_transfer and save_data:
-                    dialog_logger.info("chaining is now recording changes to save progress and moving to next node.")
                     # save data should be transferred to next node. means updates to save data's status
-                    save_data["prev_nodes"].add(next_node_id)
-                    save_data["curr_node"] = next_node_id
-                    save_data["type"] = next_node_layout.type
-                    dialog_logger.debug("found need to transfer data to next node. after transfer: save data <%s> all stored flow info <%s>", 
-                                        save_data, ["("+str(k)+":"+str(id(v))+")" for k,v in self.flow_progress.items()])
-                    next_node_success = await self.do_node_action(next_node_id, interaction_msg_or_context, save_data)
+                    dialog_logger.info("chaining is starting next node then moving data if there is any.")
+                    next_node_success = await self.do_node_action(next_node_id, interaction_msg_or_context, save_data, event_object_class=event_object_class)
                     if next_node_success:
+                        # next node was actually sucessfully sent. advance save data to point to next node
+                        save_data["prev_nodes"].add(next_node_id)
+                        save_data["curr_node"] = next_node_id
+                        save_data["type"] = next_node_layout.type
                         self.flow_progress[(interacting_user.id, next_node_id)] = save_data
+                        dialog_logger.debug("found need to transfer data to next node. after transfer: save data <%s> all stored flow info <%s>", 
+                                            save_data, ["("+str(k)+":"+str(id(v))+")" for k,v in self.flow_progress.items()])
+                        rc = 1
+                    else:
+                        rc = -3
                 else:
-                    await self.do_node_action(next_node_id, interaction_msg_or_context, None)
+                    # save data should not be transferred or doesn't exist
+                    next_node_success = await self.do_node_action(next_node_id, interaction_msg_or_context, None, event_object_class=event_object_class)
+                    if next_node_success:
+                        rc = 2
+                    else:
+                        rc = -3
         else:
+            # next node is not valid or not loaded in. Just gonna ignore
+            if not next_node_id:
+                rc = 0
+            else:
+                rc = -1
             dialog_logger.debug("chaining found next node does not exist. stopping here")
-            if event_object_class == "interaction":
-                await interaction_msg_or_context.response.send_message(content="interaction completed", ephemeral=True)
+        return rc
 
     async def handle_chaining(self, curr_active_node, next_node_id, end_progress_transfer, save_data, event_category, interaction_msg_or_context, event_object_class=None):
+        '''deals with situations where there's a previous node and want to go to next_node_id. tries to go to next_node_id, then cleans up this node'''
         dialog_logger.info("started handling chaining from <%s> to next node <%s> end progres transfer? <%s>", curr_active_node.layout_node.id, next_node_id, end_progress_transfer)
         #TODO: future: implementing different ways of finishing handling interaction. can be editing message, sending another message, or sending a modal
         #       would like to specify in yaml if edit or send new message to finish option, modals have been mostly implemented
@@ -352,17 +397,39 @@ class DialogHandler():
         if not event_object_class:
             event_object_class = "interaction" if issubclass(type(interaction_msg_or_context), Interaction) else ("message" if isinstance(interaction_msg_or_context, discord.Message) else "context")
         
+        # reference to who interacted this time.
         if event_object_class == "interaction":
             interacting_user = interaction_msg_or_context.user
         else:
             interacting_user = interaction_msg_or_context.author
-        # reference to who interacted this time.
-        await self.goto_node(next_node_id, end_progress_transfer, save_data, interaction_msg_or_context, event_object_class)
         
-        #TODO: soon: is this ordering of attempting closing then checking end progress ok?
+        goto_status = await self.goto_node(next_node_id, end_progress_transfer, save_data, interaction_msg_or_context, event_object_class)
+
+        if goto_status < 0:
+            # getting next node done failed, do updates to indicate failed
+            dialog_logger.info("chaining from <%s> to next node <%s> failed", curr_active_node.layout_node.id, next_node_id)
+            if event_object_class == "interaction" and not interaction_msg_or_context.response.is_done():
+                await interaction_msg_or_context.response.send_message(content="can't move to next step", ephemeral=True)
+            else:
+                await interaction_msg_or_context.channel.send(content="can't move to next step")
+        else:
+            # getting next node done succeeded, do updates to indicate success
+            if event_object_class == "interaction" and not interaction_msg_or_context.response.is_done():
+                # safety net. should only activate if node didn't reply already. Just here so that it doesn't get confusing because discord will 
+                # pop up a interaction failed if it isn't responded to
+                await interaction_msg_or_context.response.send_message(content="interaction complete", ephemeral=True)
+
+            dialog_logger.info("chaining from <%s> to next node <%s> succeeded.", curr_active_node.layout_node.id, next_node_id)
+
+        # regardless of success or failing sending next node, maybe want to close this node.
+        # first give node an update about how chaining went and where to, node can store changes
+        # then try close
+        await curr_active_node.post_chaining(goto_status, self.nodes[next_node_id] if next_node_id and next_node_id in self.nodes else None)
         if await curr_active_node.can_close():
+            dialog_logger.debug("closing node after chaining from <%s> to next node <%s>.", curr_active_node.layout_node.id, next_node_id)
             await self.close_node(curr_active_node)
         elif end_progress_transfer and curr_active_node.save_data:
+            dialog_logger.debug("cleaning becuase of end progress")
             for prev_node in curr_active_node.save_data["prev_nodes"]:
                 if (interacting_user.id, prev_node) in self.flow_progress:
                     del self.flow_progress[(interacting_user.id, prev_node)]

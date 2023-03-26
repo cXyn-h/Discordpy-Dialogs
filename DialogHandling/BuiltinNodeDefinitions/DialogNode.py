@@ -17,10 +17,10 @@ class DialogLayout:
         if "command" in args:
             self.command = args["command"]
 
-    async def do_node(self, handler, save_data, interaction_msg_or_context, passed_in_type, msg_options={}):
+    async def do_node(self, handler, save_data, interaction_msg_or_context, event_object_class, msg_options={}):
         #NOTE: This will probably need some changing to allow for channging channels to send in
         send_method = DialogHandler.interaction_send_message_wrapper(interaction_msg_or_context) \
-                        if passed_in_type == "interaction" else interaction_msg_or_context.channel.send
+                        if event_object_class == "interaction" else interaction_msg_or_context.channel.send
         if len(self.options) > 0:
             view = DialogHandler.DialogView(handler, self.id)
             dialog_message = await send_method(content=self.prompt, view=view, **msg_options)
@@ -69,6 +69,7 @@ class DialogNode:
             view.mark_active_node(self)
         self.is_active = True
         self.replies = 0
+        self.needs_to_close = False
 
         if len(self.layout_node.options) > 0:
             self.event_keys = {"interaction":channel_message.id}
@@ -103,13 +104,22 @@ class DialogNode:
         # return none if not allowed to chain to node
         chosen_option = self.layout_node.options[interaction.data["custom_id"]]
         return (chosen_option.next_node, chosen_option.end)
+    
+    async def post_chaining(self, chaining_status, next_node_layout):
+        if next_node_layout:
+            if next_node_layout.type == self.layout_node.type:
+                if self.save_data and len(next_node_layout.options) > 1:
+                    self.needs_to_close = True
+            else:
+                if self.save_data:
+                    self.needs_to_close = True
+        else:
+            self.needs_to_close = True
 
     async def can_close(self):
         # TODO: assuming when need to close previous message for progression gets messy with end of chain no-option dialog nodes. 
         # This closes on every instance, need a better flag
-        if self.save_data:
-            return True
-        return False
+        return self.needs_to_close
     
     async def close(self, was_fulfilled):
         if self.view:
