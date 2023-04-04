@@ -1,13 +1,14 @@
 import DialogHandling.DialogHandler as DialogHandler
 import DialogHandling.DialogNodeParsing as DialogNodeParsing
+import DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
 
-class ReplyLayout:
+class ReplyLayout(BaseNodeDefinitions.BaseLayout):
     required_input=["id"]
     optional_input=["prompt", "submit_callback", "next_node", "end"]
     type = "reply"
     def __init__(self, args):
         # print("dialog init internal",args)
-        self.id = args["id"]
+        super().__init__(args)
         self.prompt= ""
         self.submit_callback = ""
         self.next_node=""
@@ -29,7 +30,7 @@ class ReplyLayout:
 
     async def do_node(self, handler, save_data, interaction_msg_or_context, event_object_class, msg_options={}):
         send_method = DialogHandler.interaction_send_message_wrapper(interaction_msg_or_context) \
-                        if event_object_class == "interaction" else interaction_msg_or_context.channel.send
+                        if event_object_class == "Interaction" else interaction_msg_or_context.channel.send
         msg_contents = self.prompt if self.prompt else "Please type response in chat"
         prompt_message = await send_method(content=msg_contents, **msg_options)
         return ReplyNode(self, save_data, channel_message=prompt_message)
@@ -45,19 +46,18 @@ class ReplyLayout:
     def __repr__(self):
         return f"Reply {self.id} prompt: {self.prompt}"
     
-class ReplyNode:
+class ReplyNode(BaseNodeDefinitions.BaseNode):
     def __init__(self, layout_node, save_data=None, channel_message=None):
-        self.layout_node = layout_node
-        self.save_data = save_data
+        super().__init__(layout_node, save_data, channel_message)
         self.waits = ["reply"]
-        self.channel_message = channel_message
         self.reply_messages = []
         self.replies = 0
-        self.is_active = True
 
+        # was tested at some point but doesn't seem feasible so far. not in use
         self.event_keys = {"reply":channel_message.id}
 
     def form_key(self, event):
+        # was tested at some point but doesn't seem feasible so far. not in use
         if event.reference:
             return event.reference.message_id
         return None
@@ -77,16 +77,16 @@ class ReplyNode:
 
     async def process_event(self, handler, message):
         #TODO: fancy filtering what part of message want to save
-        changes = {"reply":message.content}
         self.reply_messages.append(message)
-        if self.layout_node.data:
-            if not "data" in changes:
-                changes["data"] = {}
-            changes["data"].update(self.layout_node.data)
-        if self.layout_node.flag:
-            changes["flag"] = self.layout_node.flag
         self.replies += 1
-        return (changes, None)
+        return None
+    
+    async def update_save(self, message, data_loc):
+        data_loc[self.layout_node.id] = message.content
+        if self.layout_node.data:
+            data_loc.update(self.layout_node.data)
+        if self.layout_node.flag:
+            data_loc["flag"] = self.layout_node.flag
 
     async def get_chaining_info(self, message):
         return (self.layout_node.next_node, self.layout_node.end)
@@ -100,4 +100,4 @@ class ReplyNode:
     async def close(self, was_fulfilled):
         if not was_fulfilled:
             await self.channel_message.edit(content="timed out. please try again")
-        self.is_active = False
+        await super().close(was_fulfilled=was_fulfilled)

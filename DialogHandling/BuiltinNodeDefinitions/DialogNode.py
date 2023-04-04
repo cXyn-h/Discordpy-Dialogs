@@ -1,13 +1,14 @@
 import DialogHandling.DialogHandler as DialogHandler
 import DialogHandling.DialogNodeParsing as DialogNodeParsing
+import DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
 
-class DialogLayout:
+class DialogLayout(BaseNodeDefinitions.BaseLayout):
     required_input=["id"]
     optional_input=["prompt", "command", "options"]
     type = "dialog"
     def __init__(self, args):
         # print("dialog init internal",args)
-        self.id = args["id"]
+        super().__init__(args)
         #TODO: handle malformed input
         self.prompt= args["prompt"]
         self.command=""
@@ -20,7 +21,7 @@ class DialogLayout:
     async def do_node(self, handler, save_data, interaction_msg_or_context, event_object_class, msg_options={}):
         #NOTE: This will probably need some changing to allow for channging channels to send in
         send_method = DialogHandler.interaction_send_message_wrapper(interaction_msg_or_context) \
-                        if event_object_class == "interaction" else interaction_msg_or_context.channel.send
+                        if event_object_class == "Interaction" else interaction_msg_or_context.channel.send
         if len(self.options) > 0:
             view = DialogHandler.DialogView(handler, self.id)
             dialog_message = await send_method(content=self.prompt, view=view, **msg_options)
@@ -54,20 +55,17 @@ class DialogLayout:
     def __repr__(self):
         return f"Dialog {self.id} prompt: {self.prompt}, options: {self.options}"
     
-class DialogNode:
+class DialogNode(BaseNodeDefinitions.BaseNode):
     def __init__(self, layout_node, save_data=None, channel_message=None, view=None):
-        self.layout_node = layout_node
-        self.save_data = save_data
+        super().__init__(layout_node, save_data, channel_message)
         if len(self.layout_node.options) > 0:
             self.waits = ["interaction"]
         else:
             self.waits = []
         self.view = view
-        self.channel_message = channel_message
         if self.view:
             self.view.interaction_check = self.filter_event
             view.mark_active_node(self)
-        self.is_active = True
         self.replies = 0
         self.needs_to_close = False
 
@@ -89,16 +87,15 @@ class DialogNode:
     
     async def process_event(self, handler, interaction):
         chosen_option = self.layout_node.options[interaction.data["custom_id"]] 
-        changes = {}
-        
-        if chosen_option.data:
-            if not "data" in changes:
-                changes["data"] = {}
-            changes["data"].update(chosen_option.data)
-        if chosen_option.flag:
-            changes["flag"] = chosen_option.flag
         self.replies += 1
-        return (changes, chosen_option.command)
+        return chosen_option.command
+    
+    async def update_save(self, interaction, data_loc):
+        chosen_option = self.layout_node.options[interaction.data["custom_id"]]
+        if chosen_option.data:
+            data_loc.update(chosen_option.data)
+        if chosen_option.flag:
+            data_loc["flag"] = chosen_option.flag
 
     async def get_chaining_info(self, interaction):
         # return none if not allowed to chain to node
@@ -130,5 +127,5 @@ class DialogNode:
                 await self.channel_message.edit(view=self.view)
             await self.view.stop()
             self.view = None
-        self.is_active = False
+        await super().close(was_fulfilled)
         

@@ -17,6 +17,7 @@ class SimpleBot(Bot):
             logger.info('reconnected as {0.user}'.format(self))
         else:
             logger.info('We have logged in as {0.user}'.format(self))
+            self.dialog_handler.start_cleaning(self.loop)
 
     async def on_interaction(self, interaction):
         await self.dialog_handler.on_interaction(interaction)

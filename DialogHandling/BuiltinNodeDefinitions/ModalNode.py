@@ -2,15 +2,16 @@ import DialogHandling.DialogHandler as DialogHandler
 from discord import ComponentType, TextStyle
 import DialogHandling.DialogObjects as DialogObjects
 import DialogHandling.DialogNodeParsing as DialogNodeParsing
+import DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
 
-class ModalLayout:
+class ModalLayout(BaseNodeDefinitions.BaseLayout):
     required_input=["id", "title"]
     optional_input=["fields", "submit_callback", "next_node", "end"]
     type = "modal"
     def __init__(self, args):
         # print("modal init internal",args)
+        super().__init__(args)
         self.title = args["title"]
-        self.id = args["id"]
         self.fields = {}
         self.submit_callback = ""
         self.next_node=""
@@ -69,18 +70,15 @@ class ModalLayout:
             yaml_node["next_node"] = next_id
         return (ModalLayout({**yaml_node, "fields":fields}), nested_definitions)
 
-class ModalNode:
+class ModalNode(BaseNodeDefinitions.BaseNode):
     def __init__(self, layout_node, interaction, save_data=None, channel_message=None, modal=None):
-        self.layout_node = layout_node
-        self.save_data = save_data
-        self.waits = ["modal"]
+        super().__init__(layout_node, save_data, channel_message)
+        self.waits = ["modal_submit"]
         self.modal = modal
-        self.channel_message = channel_message
         self.reply_messages = []
         self.replies = 0
-        self.is_active = True
 
-        self.event_keys = {"modal":(interaction.user.id, self.layout_node.id)}
+        self.event_keys = {"modal_submit":(interaction.user.id, self.layout_node.id)}
 
     def form_key(self, event):
         return (event.user.id, self.layout_node.id)
@@ -89,24 +87,22 @@ class ModalNode:
         return True
     
     async def process_event(self, handler, interaction):
-        changes = {}
-        #TODO: parse submitted info and save
+         #TODO: parse submitted info and save
         self.reply_messages.append(interaction)
-        if not "data" in changes:
-            changes["data"] = {}
+        self.replies += 1
+        return self.layout_node.submit_callback
+    
+    async def update_save(self, interaction, data_loc):
         if self.layout_node.data:
-            changes["data"].update(self.layout_node.data)
+            data_loc.update(self.layout_node.data)
         if self.layout_node.flag:
-            changes["flag"] = self.layout_node.flag
-
+            data_loc["flag"] = self.layout_node.flag
         submission = interaction.data["components"]
         for ui_element in submission:
             # if ui_element["type"] == ComponentType.text_input: # comparison doesn't seem to work for some reasion. because can't find componenttype enum?
             element_data = ui_element["components"][0]
             customid = [x for x,y in self.layout_node.fields.items() if y.label == element_data["custom_id"]][0]
-            changes["data"].update({customid:element_data["value"]})
-        self.replies += 1
-        return (changes, self.layout_node.submit_callback)
+            data_loc.update({customid:element_data["value"]})
     
     async def get_chaining_info(self, interaction):
         return (self.layout_node.next_node, self.layout_node.end)
@@ -118,4 +114,4 @@ class ModalNode:
         return self.replies > 0
 
     async def close(self, was_fulfilled):
-        self.is_active = False
+        await super().close(was_fulfilled=was_fulfilled)
