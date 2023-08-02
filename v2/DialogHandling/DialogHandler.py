@@ -1,7 +1,7 @@
 import discord
 from discord import ui, InteractionType, Interaction
 
-import DialogHandling.DialogNodeParsing as DialogNodeParsing
+import v2.DialogHandling.DialogNodeParsing as DialogNodeParsing
 
 import yaml
 import inspect
@@ -14,11 +14,11 @@ from datetime import datetime, timedelta
 import random
 
 dialog_logger = logging.getLogger('Dialog Handler')
-dialog_logging_handler = logging.StreamHandler(sys.stderr)
-dialog_logging_format = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', '%Y-%m-%d %H:%M:%S', style='{')
-dialog_logging_handler.setFormatter(dialog_logging_format)
-dialog_logger.addHandler(dialog_logging_handler)
-dialog_logger.setLevel(logging.INFO)
+# dialog_logging_handler = logging.StreamHandler(sys.stderr)
+# dialog_logging_format = logging.Formatter('[{asctime}] [{levelname:<8}] {name}: {message}', '%Y-%m-%d %H:%M:%S', style='{')
+# dialog_logging_handler.setFormatter(dialog_logging_format)
+# dialog_logger.addHandler(dialog_logging_handler)
+dialog_logger.setLevel(logging.DEBUG)
 # WIP alpha version, will have tons of logging printout and unfinished areas.
 
 #TODO: future: variable content of message: grab at run not from file
@@ -35,7 +35,7 @@ dialog_logger.setLevel(logging.INFO)
 #TODO: future: custom defined nodes? partially there with a Base Node and regestering node types. needs fleshing out and documentation
 #TODO: immediate: program-makes-a-choice-instead-of-waiting-for-user node
 #TODO: soon: wait-for-any-message-based-on-filters-doesn't-need-to-be-reply node
-#TODO: soon: using next step flag to indicate when one stage is completed might help?
+#TODO: soon: using next step flag to indicate when one stage is completed might help? think it has to be on each option, but would it cause issues with now allowing multiple nodes in a step?
 #TODO: soon: chaining, dealing with error of having node after flow progress is saved, and what happens when you re-enter that node with flow progress still active
 #TODO: immediate: double checking user and node references used everywhere to verify events is correct. assumes that only one user per node. espcially the areas where
 #       grabbing user from save vs one that generated event
@@ -45,6 +45,7 @@ dialog_logger.setLevel(logging.INFO)
 #TODO: future: standardize events that come in
 #TODO: future: custom event inputs to handler?
 #TODO: soonish: full shakedown testing with a few people clicking buttons
+#TODO: standardize node yaml variables?
 
 class DialogHandler():
     supported_event_types = ["modal_submit", "reply", "interaction", "automatic"]

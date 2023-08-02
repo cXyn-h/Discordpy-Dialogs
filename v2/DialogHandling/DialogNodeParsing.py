@@ -2,11 +2,11 @@
     to take, the class is the blueprint for a type of node.
     parse_node is the entry point, all other methods are helpers for parsing specific fields that are stored in a different format than what
     comes in from the yanl reading.'''
-import DialogHandling.DialogObjects as DialogObjects
-import DialogHandling.BuiltinNodeDefinitions.DialogNode as DialogNodeDefinitions
-import DialogHandling.BuiltinNodeDefinitions.ModalNode as ModalNodeDefinitions
-import DialogHandling.BuiltinNodeDefinitions.MessageReplyNode as ReplyNodeDefinitions
-import DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
+import v2.DialogHandling.DialogObjects as DialogObjects
+import v2.DialogHandling.BuiltinNodeDefinitions.DialogNode as DialogNodeDefinitions
+import v2.DialogHandling.BuiltinNodeDefinitions.ModalNode as ModalNodeDefinitions
+import v2.DialogHandling.BuiltinNodeDefinitions.MessageReplyNode as ReplyNodeDefinitions
+import v2.DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
 
 node_types={"dialog":DialogNodeDefinitions.DialogLayout, "modal":ModalNodeDefinitions.ModalLayout, "reply":ReplyNodeDefinitions.ReplyLayout}
 
@@ -14,7 +14,7 @@ node_types={"dialog":DialogNodeDefinitions.DialogLayout, "modal":ModalNodeDefini
 def register_node_type(NodeLayout):
     if not hasattr(NodeLayout, "type"):
         raise Exception(f"Trying to register node layout {NodeLayout.type} but it is badly defined. missing 'type' attribute")
-    elif NodeLayout.type == BaseNodeDefinitions.BaseLayout.type:
+    elif NodeLayout.type == BaseNodeDefinitions.BaseGraphNode.type:
         raise Exception(f"Trying to register node layout {NodeLayout.type} but it hasn't been changed from base node's. Please choose a unique one")
     if NodeLayout.type in node_types and NodeLayout != node_types[NodeLayout.type]:
         raise Exception(f"Trying to register node layout {NodeLayout.type} but it is already registered with a different class")

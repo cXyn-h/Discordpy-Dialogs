@@ -1,0 +1,138 @@
+nodes:
+  - id: "welcome"
+    type: Base
+    version: 3.5.0
+    start:
+      message_command:
+      slash_command:
+    close_callbacks:
+      - clear_buttons
+    callbacks:
+      - send_response:
+          content: Welcome to testing! How can I help?
+          components:
+            - custom_id: begin
+              label: begin?
+            - custom_id: stop
+              label: no.
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu
+        schedule_close: node
+        transitions:
+          - node_names: step1
+            session_chaining: start
+            transition_filters:
+              - button_is: begin
+
+  - id: step1
+    type: Base
+    version: 3.5.0
+    close_callbacks:
+      - clear_buttons: 
+          timeout: timed out, please try again
+    callbacks:
+      - send_response:
+          content: Please note if you do not finish you will need to restart. step 1, blah blah
+          components:
+            - label: "complete"
+              custom_id: "complete"
+            - label: "help"
+              custom_id: "help1"
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu
+        transitions:
+          - node_names: step2
+            session_chaining: transfer
+            schedule_close: node
+            transition_filters:
+              - button_is: complete
+          - node_names: help1
+            session_chaining: transfer
+            transition_filters:
+              - button_is: help1
+
+  - id: step2
+    type: Base
+    version: 3.5.0
+    close_callbacks:
+      - clear_buttons: 
+          timeout: timed out, please try again
+    callbacks:
+      - send_response:
+          content: "ok step 2, ahajdljigrijrgjlihlthljthlj"
+          components:
+            - label: "complete"
+              custom_id: "complete"
+            - label: "help"
+              custom_id: "help2"
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu
+        transitions:
+          - node_names: finishing
+            session_chaining: end
+            schedule_close: node
+            transition_filters:
+              - button_is: complete
+          - node_names: help2
+            session_chaining: transfer
+            transition_filters:
+              - button_is: help2
+  - id: step3
+    type: Base
+    version: 3.5.0
+    close_callbacks:
+      - clear_buttons: 
+          timeout: timed out, please try again
+    callbacks:
+      - send_response:
+          content: "ok step 3, JREIJ[ORT,P["
+          components:
+            - label: "complete"
+              custom_id: "complete"
+            - label: "help"
+              custom_id: "help3"
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu
+        transitions:
+          - node_names: finishing
+            session_chaining: end
+            schedule_close: node
+            transition_filters:
+              - button_is: complete
+          - node_names: help3
+            session_chaining: transfer
+            transition_filters:
+              - button_is: help2
+
+  - id: finishing
+    type: Base
+    version: 3.5.0
+    callbacks:
+      - send_response:
+          content: "Thank you for your responses"
+  - id: help1
+    type: Base
+    version: 3.5.0
+    callbacks:
+      - send_response:
+          content: "how to do step 1 hdfwejtiwejapgiwjep"
+  - id: help2
+    type: Base
+    version: 3.5.0
+    callbacks:
+      - send_response:
+          content: "how to do step 2 grehjpethopjryj[komrjypk[,"
+  - id: help3
+    type: Base
+    version: 3.5.0
+    callbacks:
+      - send_response:
+          content: "how to do step 3 throp[kjy[ktthm[oldml"

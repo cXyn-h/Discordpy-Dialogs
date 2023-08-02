@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-class BaseLayout:
+class BaseGraphNode:
     type = "FILL IN WITH YOUR TYPE, UNIQUE KEY AMONG ALL NODES USED"
     def __init__(self, args):
         '''call from parsing after formatting things correctly. The exact format and number for fields specific to this node is up to designer.
@@ -18,8 +18,8 @@ class BaseLayout:
         pass
 
 class BaseNode:
-    def __init__(self, layout_node, save_data=None, channel_message=None, timeout_duration=timedelta(minutes=3)):
-        self.layout_node = layout_node
+    def __init__(self, graph_node, save_data=None, channel_message=None, timeout_duration=timedelta(minutes=3)):
+        self.layout_node = graph_node
         self.save_data = save_data
         self.channel_message = channel_message
         self.timeout = datetime.utcnow() + timeout_duration

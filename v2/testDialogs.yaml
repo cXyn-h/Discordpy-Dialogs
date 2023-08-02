@@ -1,5 +1,13 @@
 - type: "dialog"
   id: "welcome"
+  filters:
+    - "match_author 12345"
+    - or:
+        - "match_session_author"
+        - "from_dev"
+        - and: 
+            - "true"
+            - "in_server 23456"
   prompt: "Hi how can I help?"
   options:
     - label: "Questionnaire"

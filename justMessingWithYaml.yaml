@@ -1,0 +1,60 @@
+nodes:
+  - id: "nodeA"
+    type: Base
+    version: 3.5.0
+    callbacks:
+      - test_optional_parameters
+    start: True
+    events:
+      click:
+        filters:
+          - testfilter_1
+          - check_from: [asdf,bdf,sd]
+          - check_from: 
+              val1: 34
+              val2: a
+    TTL: 13
+  - id: "nodeB"
+    version: 3.5.0
+    start:
+      click:
+        filters:
+          - testfilter_1
+    close_callbacks:
+     - filter_exception
+    events:
+      click:
+        filters:
+          - or:
+            - testfilter_1
+            - check_from: dfshd
+        callbacks:
+          - test_optional_parameters: asdf
+        schedule_close: node
+        transitions:
+          - node_names: [nodeA, nodeC]
+            # session_chaining: start
+            transition_filters:
+              - ok_to_transition
+              # - is_awardable
+      message:
+        callbacks:
+          - send_random_message:
+              choices:
+                - content: dfjsidfjsd
+                  components:
+                    - ID: button
+                      text: asdf
+          - sjfisd
+---
+nodes:
+  - id: "nodeC"
+    v: 3.5.0
+    events:
+      message:
+---
+nodes:
+  - id: "nodeD"
+    v: 3.5.0
+  - id: "nodeE"
+    v: 3.5.0    

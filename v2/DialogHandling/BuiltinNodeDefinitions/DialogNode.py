@@ -1,8 +1,8 @@
-import DialogHandling.DialogHandler as DialogHandler
-import DialogHandling.DialogNodeParsing as DialogNodeParsing
-import DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
+import v2.DialogHandling.DialogHandler as DialogHandler
+import v2.DialogHandling.DialogNodeParsing as DialogNodeParsing
+import v2.DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
 
-class DialogLayout(BaseNodeDefinitions.BaseLayout):
+class DialogLayout(BaseNodeDefinitions.BaseGraphNode):
     required_input=["id"]
     optional_input=["prompt", "command", "options"]
     type = "dialog"

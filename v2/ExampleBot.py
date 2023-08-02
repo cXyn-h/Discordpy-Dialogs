@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord.ext.commands import Bot
 
-from DialogHandling.DialogHandler import DialogHandler
+from v2.DialogHandling.DialogHandler import DialogHandler
 import logging
 logger = logging.getLogger('discord')
 class SimpleBot(Bot):

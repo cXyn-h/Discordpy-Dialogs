@@ -1,4 +1,3 @@
-#TODO: future: would base node class make things easier?
 from discord import TextStyle
 
 #TODO: soon: Discord ui elements styles can be defined in yaml files

@@ -1,10 +1,10 @@
-import DialogHandling.DialogHandler as DialogHandler
+import v2.DialogHandling.DialogHandler as DialogHandler
 from discord import ComponentType, TextStyle
-import DialogHandling.DialogObjects as DialogObjects
-import DialogHandling.DialogNodeParsing as DialogNodeParsing
-import DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
+import v2.DialogHandling.DialogObjects as DialogObjects
+import v2.DialogHandling.DialogNodeParsing as DialogNodeParsing
+import v2.DialogHandling.BuiltinNodeDefinitions.BaseNode as BaseNodeDefinitions
 
-class ModalLayout(BaseNodeDefinitions.BaseLayout):
+class ModalLayout(BaseNodeDefinitions.BaseGraphNode):
     required_input=["id", "title"]
     optional_input=["fields", "submit_callback", "next_node", "end"]
     type = "modal"

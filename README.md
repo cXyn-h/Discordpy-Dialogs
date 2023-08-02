@@ -1,7 +1,11 @@
 # Discordpy-Dialogs-alpha
 alpha version to mess around with creating a system to manage interactive dialogs for a discord bot
 
+Now on Version 3.5.0, with a big overhaul to how nodes are structured from previous versions. Documentation to come soon.
 
+
+
+# Version 2 Documentation
 ## Running Example Dialog
 This project reads the token for connecting to Discord from config.json. After copying, create a `config.json` file. Get bot token from dev portal and add it to file like this:
 ```
