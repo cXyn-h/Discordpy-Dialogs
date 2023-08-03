@@ -46,12 +46,12 @@ nodes:
          - clicked_this_menu
         transitions:
           - node_names: step2
-            session_chaining: transfer
+            session_chaining: chain
             schedule_close: node
             transition_filters:
               - button_is: complete
           - node_names: help1
-            session_chaining: transfer
+            session_chaining: chain
             transition_filters:
               - button_is: help1
 
@@ -80,7 +80,6 @@ nodes:
             transition_filters:
               - button_is: complete
           - node_names: help2
-            session_chaining: transfer
             transition_filters:
               - button_is: help2
   - id: step3
@@ -109,6 +108,7 @@ nodes:
               - button_is: complete
           - node_names: help3
             session_chaining: transfer
+            session_chaining: chain
             transition_filters:
               - button_is: help2
 
