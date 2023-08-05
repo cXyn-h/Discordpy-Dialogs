@@ -5,11 +5,9 @@ nodes:
     start:
       message_command:
       slash_command:
-    close_callbacks:
-      - clear_buttons
     callbacks:
       - send_response:
-          content: Welcome to testing! How can I help?
+          content: Welcome to the Testing Quiz!
           components:
             - custom_id: begin
               label: begin?
@@ -21,93 +19,76 @@ nodes:
          - clicked_this_menu
         schedule_close: node
         transitions:
-          - node_names: step1
+          - node_names: question1
             session_chaining: start
             transition_filters:
               - button_is: begin
+            transition_callbacks:
+              - session_link_user
+              - clear_buttons
 
-  - id: step1
+  - id: question1
     type: Base
     version: 3.5.0
     close_callbacks:
-      - clear_buttons: 
-          timeout: timed out, please try again
+      - remove_message
     callbacks:
       - send_response:
-          content: Please note if you do not finish you will need to restart. step 1, blah blah
+          content: "Please note if you do not finish you will need to restart. Choice 1:"
           components:
-            - label: "complete"
-              custom_id: "complete"
+            - label: "sneep"
+              custom_id: "sneep"
+            - label: "snorp"
+              custom_id: "snorp"
             - label: "help"
               custom_id: "help1"
     events:
       button_click:
         filters:
          - clicked_this_menu
+         - is_session_user
         transitions:
-          - node_names: step2
+          - node_names: question2
             session_chaining: chain
             schedule_close: node
             transition_filters:
-              - button_is: complete
+              - button_is: [sneep, snorp]
+            transition_callbacks:
+              - save_quiz_answer
           - node_names: help1
             session_chaining: chain
             transition_filters:
               - button_is: help1
 
-  - id: step2
+  - id: question2
     type: Base
     version: 3.5.0
     close_callbacks:
-      - clear_buttons: 
-          timeout: timed out, please try again
+      - remove_message
     callbacks:
       - send_response:
-          content: "ok step 2, ahajdljigrijrgjlihlthljthlj"
+          content: "ok choice 2, ahajdljigrijrgjlihlthljthlj"
           components:
-            - label: "complete"
-              custom_id: "complete"
+            - label: "bee"
+              custom_id: "bee"
+            - label: "bean"
+              custom_id: "bean"
             - label: "help"
               custom_id: "help2"
     events:
       button_click:
         filters:
-         - clicked_this_menu
+          - clicked_this_menu
+          - is_session_user
         transitions:
           - node_names: finishing
-            session_chaining: end
+            session_chaining: chain
             schedule_close: node
             transition_filters:
-              - button_is: complete
+              - button_is: [bee, bean]
+            transition_callbacks:
+              - save_quiz_answer
           - node_names: help2
-            transition_filters:
-              - button_is: help2
-  - id: step3
-    type: Base
-    version: 3.5.0
-    close_callbacks:
-      - clear_buttons: 
-          timeout: timed out, please try again
-    callbacks:
-      - send_response:
-          content: "ok step 3, JREIJ[ORT,P["
-          components:
-            - label: "complete"
-              custom_id: "complete"
-            - label: "help"
-              custom_id: "help3"
-    events:
-      button_click:
-        filters:
-         - clicked_this_menu
-        transitions:
-          - node_names: finishing
-            session_chaining: end
-            schedule_close: node
-            transition_filters:
-              - button_is: complete
-          - node_names: help3
-            session_chaining: transfer
             session_chaining: chain
             transition_filters:
               - button_is: help2
@@ -115,24 +96,24 @@ nodes:
   - id: finishing
     type: Base
     version: 3.5.0
+    close_callbacks:
+      - remove_message
     callbacks:
-      - send_response:
-          content: "Thank you for your responses"
+      - report_quiz_answers
+      
   - id: help1
     type: Base
     version: 3.5.0
+    close_callbacks:
+      - remove_message
     callbacks:
       - send_response:
-          content: "how to do step 1 hdfwejtiwejapgiwjep"
+          content: "Yes, make a choice"
   - id: help2
     type: Base
     version: 3.5.0
+    close_callbacks:
+      - remove_message
     callbacks:
       - send_response:
-          content: "how to do step 2 grehjpethopjryj[komrjypk[,"
-  - id: help3
-    type: Base
-    version: 3.5.0
-    callbacks:
-      - send_response:
-          content: "how to do step 3 throp[kjy[ktthm[oldml"
+          content: "pls save"

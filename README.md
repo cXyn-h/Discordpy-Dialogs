@@ -1,8 +1,8 @@
-# Discordpy-Dialogs-alpha
-alpha version to mess around with creating a system to manage interactive dialogs for a discord bot
+# MultiTalking (placeholder title)
+Currently on alpha version 3.5.0. !!!THIS IS YOUR WARNING THINGS ARE STILL A BIT ROUGH!!! Created to mess around with a system to manage interactive dialogs for a discord bot. <br/>
+This is a cross between a state machine and server tracking sessions for users. Loads one copy of state machine as a map of how users can interact with bot, then have a central object tracking where individual instances/users are and their data. Designed to be configurable and extensible with all nodes defined through yaml and ability to add custom functions to hook into lifecycle. Discord integration is done through these functions. <br/>
 
 Now on Version 3.5.0, with a big overhaul to how nodes are structured from previous versions. Documentation to come soon.
-
 
 
 # Version 2 Documentation

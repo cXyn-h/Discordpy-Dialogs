@@ -30,7 +30,7 @@ async def send_response(active_node, event, message_settings):
     active_node.message = sent_message
     active_node.view = view
 
-async def clear_buttons(active_node, event, close_messages=None):
+async def clear_buttons(active_node, event, goal_node = None, close_messages=None):
     if active_node.view and active_node.view is not None:
         active_node.view.stop()
     if active_node.message:
@@ -51,9 +51,28 @@ async def remove_message(active_node, event):
         await active_node.message.delete()
         active_node.message = None
 
-def button_is(active_node, event, goal_node, custom_id):
-    return event.data["custom_id"] == custom_id
+def button_is(active_node, event, goal_node, custom_ids):
+    if isinstance(custom_ids, str):
+        return event.data["custom_id"] == custom_ids
+    else:
+        return event.data["custom_id"] in custom_ids
 
+def is_session_user(active_node, event, goal_node=None):
+    if active_node.session is None or "user" not in active_node.session:
+        return False
+    if isinstance(event, Interaction):
+        return active_node.session["user"].id == event.user.id
+    else:
+        return active_node.session["user"].id == event.author.id
+    
+def session_link_user(active_node, event, goal_node):
+    if goal_node.session is None:
+        return
+    if isinstance(event, Interaction):
+        goal_node.session["user"] = event.user
+    else: 
+        goal_node.session["user"] = event.author
 
-dialog_func_info = {send_response:["callback"], send_message:["callback"], clear_buttons:["callback"], 
-                    clicked_this_menu:["filter"], button_is:["transition_filter"],remove_message:["callback"]}
+dialog_func_info = {send_response:["callback"], send_message:["callback"], clear_buttons:["callback", "transition_callback"], 
+                    clicked_this_menu:["filter"], button_is:["transition_filter"], remove_message:["callback"], 
+                    is_session_user:["filter", "transition_filter"],session_link_user: ["transition_callback"]}

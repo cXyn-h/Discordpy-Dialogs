@@ -47,6 +47,10 @@ def parse_version_string(version_string):
         raise Exception(f"{version_string} is invalid version, must have three period separated numbers")
     return version_tuple
 
+def parse_name(name):
+    #TODO: WIP
+    pass
+
 def parse_files(*file_names, existing_nodes = {}):
     '''parses list of files for nodes and appends them onto existing nodes, raising error if already there'''
     dialog_logger.debug(f"loading files {file_names}, with existing nodes {existing_nodes}")
@@ -76,7 +80,6 @@ def parse_file(file_name, existing_nodes={}):
                     raise Exception(f"node {node.id} has been redefined at file {file_name} doc {doc_ind} node {node_ind}")
                 final_node_list[node.id] = node
     dialog_logger.info(f"finished loading file {file_name}, found <{len(final_node_list)}> nodes")
-    # dialog_logger.debug("nodes: %s", final_node_list)
     return final_node_list
 
 def parse_node(yaml_node):
@@ -86,7 +89,7 @@ def parse_node(yaml_node):
             raise Exception(f"{yaml_node['type']} is unknown type")
         node_type = yaml_node["type"]
     # node_type should be filled at this point, either Base or listed type
-    # type is known, make sure definition already parsed as well
+    # make sure type definition already parsed as well
     if node_type not in NODE_DEFINITION_CACHE:
         try:
             NODE_DEFINITION_CACHE[node_type] = yaml.safe_load(ALLOWED_GRAPH_NODES[node_type].GraphNode.DEFINITION)

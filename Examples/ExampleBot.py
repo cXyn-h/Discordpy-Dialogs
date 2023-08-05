@@ -5,6 +5,7 @@ from discord.ext.commands import Bot
 
 import src.DialogHandler as DialogHandler
 import Examples.DiscordMessagingFuncs as funcs
+import Examples.SpecificTestingFuncs as funFuncs
 import Examples.DiscordEvents as DiscordEvents
 import logging
 
@@ -17,6 +18,7 @@ class SimpleBot(Bot):
         self.main_menu_handler = DialogHandler.DialogHandler(bot=self)
         self.main_menu_handler.setup_from_files(["Examples/WalkthroughMenu.yaml"])
         self.main_menu_handler.register_module(funcs)
+        self.main_menu_handler.register_module(funFuncs)
         # can instantiate more handlers to manage separate areas
 
     async def on_ready(self):

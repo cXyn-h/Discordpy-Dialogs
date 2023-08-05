@@ -28,6 +28,7 @@ options:
 
     @classmethod
     def verify_format_data(cls, data):
+        '''WIP. need some way to verify data is in right format. not sure which way yet'''
         # for ind, callback in enumerate(data["callbacks"]):
         #     if isinstance(callback, str):
         #         data["callbacks"][ind] = {callback:None}
@@ -115,13 +116,24 @@ class Node():
         self.session = session
         self.is_active = True
         self.handler = None
-        if timeout_duration == None:
-            timeout_duration=timedelta(seconds=self.graph_node.TTL)
-        self.timeout = datetime.utcnow() + timeout_duration
+
+        if self.graph_node.TTL == -1:
+            # specifically, don't time out
+            self.timeout = None
+        else:
+            if timeout_duration == None:
+                # should never happen anyways
+                timeout_duration=timedelta(seconds=self.graph_node.TTL)
+            self.timeout = datetime.utcnow() + timeout_duration
         
-    def added_to_handler(self,handler):
+    def added_to_handler(self, handler):
+        '''callback for when node is now being tracked by a handler that I don't want showing up in list of custom callbacks. if overriding
+        child class, be sure to call parent'''
+        #one handler per node. 
         self.handler = handler
 
     def close_node(self):
+        '''callback for when node is about to close that I don't want showing up in list of custom callbacks. if overriding
+        child class, be sure to call parent'''
         self.is_active = False
         self.handler = None
