@@ -1,7 +1,7 @@
 nodes:
   - id: "welcome"
     type: Base
-    version: 3.5.0
+    v: 3.5.0
     start:
       message_command:
       slash_command:

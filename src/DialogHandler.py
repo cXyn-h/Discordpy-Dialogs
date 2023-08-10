@@ -24,15 +24,12 @@ execution_reporting = logging.getLogger('Handler Reporting')
 logHelper.use_default_setup(execution_reporting)
 execution_reporting.setLevel(logging.DEBUG)
 
-#TODO: flesh out nodes
-#TODO: yaml support for what events thrown during transitions?
+#TODO: yaml support for what events want to throw during transitions?
 #TODO: allow yaml names to have scope and qualified names stuff ie parse . in names
 #TODO: validation for functions parameters
 #TODO: exception handling, how to direct output
-#TODO: running transitions, the transitions listed inside don't have anything verifying structure and that feels weird
 #TODO: maybe fix cleaning so it doesn't stop if one node excepts? but what to do with that node that excepts when trying to stop and clear?
 #TODO: session and closing previous step nodes, want more control over nodes
-#TODO: protecting against badly formatted yaml
 #TODO: create modal and message event support
 
 class DialogHandler():
@@ -243,7 +240,7 @@ class DialogHandler():
             node_filters = []
         dialog_logger.debug(f"filters from node are {node_filters}")
         if start_version:
-            dialog_logger.debug(f"running start version of filters on node {active_node}, node structure is {active_node.graph_node.start}")
+            dialog_logger.debug(f"running start version of filters on node {active_node}, start filters are {active_node.graph_node.start}")
             node_filters.extend(active_node.graph_node.get_start_filters(event_key))
         else:
             node_filters.extend(active_node.graph_node.get_event_filters(event_key))
@@ -336,7 +333,7 @@ class DialogHandler():
         node_transitions = active_node.graph_node.get_transitions(event_key)
         passed_transitions = []
         for transition_ind, transition in enumerate(node_transitions):
-            dialog_logger.debug(f"going through transtion <{transition_ind}>")
+            dialog_logger.debug(f"starting checking transtion <{transition_ind}>")
 
             # might have just one next node, rest of format expects list of nodes so format it.
             node_name_list = transition["node_names"]
@@ -359,6 +356,7 @@ class DialogHandler():
                     continue
                     
                 if "transition_filters" in transition:
+                    execution_reporting.debug(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> has transition filters {transition['transition_filters']}")
                     try:
                         filter_res = transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
                     except Exception as e:
@@ -397,7 +395,7 @@ class DialogHandler():
                     value = callback[key]
                     await self.run_func_async(key, "transition_callback", active_node, event, next_node, values=value)
 
-            dialog_logger.info(f"checking session data, {session}")
+            # dialog_logger.info(f"checking session data, {session}")
 
             close_flag = passed_transition[3]
             directives[0] = directives[0] or ("node" in close_flag)

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 class GraphNode():
     VERSION = "3.5.0"
+    #TODO: maybe merge this with Schema? need some way to query for default values in schema
     DEFINITION='''
 options:
   - name: id
@@ -24,6 +25,94 @@ options:
     presence: optional
     default: []
 '''
+    SCHEMA='''
+type: object
+patternProperties:
+    "^v(ersion)?$":
+        type: "string"
+properties:
+    id: 
+        type: "string"
+    type:
+        type: "string"
+    callbacks:
+        type: array
+        items:
+            type: ["string", "object"]
+    start:
+        type: object
+        patternProperties:
+            ".+":
+                anyOf:
+                    - type: "null"
+                    - type: "object"
+                      properties:
+                        filters:
+                            type: array
+                            items:
+                                type: ["string", "object"]
+                      unevaluatedProperties: false
+        unevaluatedProperties: false
+    events:
+        type: object
+        patternProperties:
+            ".+":
+                anyOf:
+                    - type: "null"
+                    - type: "object"
+                      properties:
+                        filters:
+                            type: array
+                            items:
+                                type: ["string", "object"]
+                        callbacks:
+                            type: array
+                            items:
+                                type: ["string", "object"]
+                        schedule_close:
+                            anyOf:
+                                - enum: ["node", "session"]
+                                - type: "array"
+                                  items:
+                                    enum: ["node", "session"]
+                        transitions:
+                            type: array
+                            items:
+                                type: object
+                                properties:
+                                    node_names:
+                                        anyOf:
+                                            - type: "string"
+                                            - type: "array"
+                                              items:
+                                                type: "string"
+                                    transition_filters:
+                                        type: array
+                                        items:
+                                            type: ["string", "object"]
+                                    transition_callbacks:
+                                        type: array
+                                        items:
+                                            type: ["string", "object"]
+                                    schedule_close:
+                                        anyOf:
+                                            - enum: ["node", "session"]
+                                            - type: "array"
+                                              items:
+                                                enum: ["node", "session"]
+                                    session_chaining:
+                                        enum: ["start", "end", "chain"]
+                                required: [node_names]
+                      unevaluatedProperties: false
+        unevaluatedProperties: false
+    TTL: 
+        type: integer
+    close_callbacks:
+        type: array
+        items:
+            type: ["string", "object"]
+required: ["id"]
+    '''
     TYPE="Base"
 
     @classmethod

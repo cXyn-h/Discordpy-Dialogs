@@ -4,7 +4,8 @@ nodes:
     version: 3.5.0
     callbacks:
       - test_optional_parameters
-    start: True
+    start:
+      click:
     events:
       click:
         filters:
