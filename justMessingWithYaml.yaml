@@ -1,7 +1,7 @@
 nodes:
   - id: "nodeA"
     type: Base
-    version: 3.5.0
+    version: "3.5.0"
     callbacks:
       - test_optional_parameters
     start:
@@ -16,7 +16,7 @@ nodes:
               val2: a
     TTL: 13
   - id: "nodeB"
-    version: 3.5.0
+    version: "3.5.0"
     start:
       click:
         filters:
@@ -50,12 +50,12 @@ nodes:
 ---
 nodes:
   - id: "nodeC"
-    v: 3.5.0
+    v: "3.5.0"
     events:
       message:
 ---
 nodes:
   - id: "nodeD"
-    v: 3.5.0
+    v: "3.5.0"
   - id: "nodeE"
-    v: 3.5.0    
+    v: "3.5.0"    

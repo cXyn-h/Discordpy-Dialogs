@@ -1,7 +1,7 @@
 nodes:
   - id: "welcome"
     type: Base
-    v: 3.5.0
+    v: "3.5.0"
     start:
       message_command:
       slash_command:
@@ -29,7 +29,7 @@ nodes:
 
   - id: question1
     type: Base
-    version: 3.5.0
+    version: "3.5.0"
     close_callbacks:
       - remove_message
     callbacks:
@@ -62,7 +62,7 @@ nodes:
 
   - id: question2
     type: Base
-    version: 3.5.0
+    version: "3.5.0"
     close_callbacks:
       - remove_message
     callbacks:
@@ -95,7 +95,7 @@ nodes:
 
   - id: finishing
     type: Base
-    version: 3.5.0
+    version: "3.5.0"
     close_callbacks:
       - remove_message
     callbacks:
@@ -103,7 +103,7 @@ nodes:
       
   - id: help1
     type: Base
-    version: 3.5.0
+    version: "3.5.0"
     close_callbacks:
       - remove_message
     callbacks:
@@ -111,7 +111,7 @@ nodes:
           content: "Yes, make a choice"
   - id: help2
     type: Base
-    version: 3.5.0
+    version: "3.5.0"
     close_callbacks:
       - remove_message
     callbacks:
