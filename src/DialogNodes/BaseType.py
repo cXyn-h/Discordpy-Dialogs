@@ -2,7 +2,7 @@
 #TODO: proofing against None values: what is values if you just list events flag and leave value blank, getters proofed against None, handler accesses these directly without getters so which ones might crash because of None
 from datetime import datetime, timedelta
 
-class GraphNode():
+class BaseGraphNode():
     VERSION = "3.5.0"
     #TODO: maybe merge this with Schema? need some way to query for default values in schema
     DEFINITION='''
@@ -149,7 +149,7 @@ required: ["id"]
             setattr(self, key, option)
 
     def activate_node(self, session=None):
-        return Node(self, session, timeout_duration=timedelta(seconds=self.TTL))
+        return BaseNode(self, session, timeout_duration=timedelta(seconds=self.TTL))
     
     def get_start_filters(self, event_key):
         if (self.start is not None) and (event_key in self.start) and (self.start[event_key] is not None) and ("filters" in self.start[event_key]):
@@ -200,7 +200,7 @@ required: ["id"]
         return self.close_callbacks
 
 
-class Node():
+class BaseNode():
     def __init__(self, graph_node, session=None, timeout_duration:timedelta=None) -> None:
         self.graph_node = graph_node
         self.session = session

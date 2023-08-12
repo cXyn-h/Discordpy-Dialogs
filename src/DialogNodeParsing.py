@@ -4,32 +4,37 @@ import copy
 import logging
 import sys
 
-import src.DialogNodes.BaseNode as BaseType
+import src.DialogNodes.BaseType as BaseType
+import src.utils.LoggingHelper as logHelper
 
 from jsonschema import validate, ValidationError
 
 #TODO: future: autoimport nodes from folder?
 
-dialog_logger = logging.getLogger('Dialog Handler')
 execution_reporting = logging.getLogger('Handler Reporting')
+
+parsing_logger = logging.getLogger('Dialog Parsing')
+logHelper.use_default_setup(parsing_logger)
+parsing_logger.setLevel(logging.DEBUG)
 
 ALLOWED_GRAPH_NODES = {"Base":BaseType}
 '''list of modules allowed to be used in graph'''
-NODE_DEFINITION_CACHE = {"Base": yaml.safe_load(BaseType.GraphNode.DEFINITION)}
-NODE_SCHEMA_CACHE = {"Base": yaml.safe_load(BaseType.GraphNode.SCHEMA)}
+NODE_DEFINITION_CACHE = {"Base": yaml.safe_load(BaseType.BaseGraphNode.DEFINITION)}
+NODE_SCHEMA_CACHE = {"Base": yaml.safe_load(BaseType.BaseGraphNode.SCHEMA)}
 
-def register_node(type_module, re_register = False):
-    if not hasattr(type_module,"GraphNode"):
+def register_node(type_module, type_name, re_register = False):
+    #TODO: testing after creating nodes
+    if not hasattr(type_module, type_name+"GraphNode"):
         raise Exception(f"trying to register node type but module does not have identifiable GraphNode class.")
-    # maybe duck type this instead
-    # if not issubclass(type_module.GraphNode, BaseType.GraphNode):
-    #     raise Exception(f"module does not have valid Graphnode definition, not subclass of base Graph node")
-    if not hasattr(type_module, "Node"):
+    if not hasattr(type_module, type_name+"Node"):
         raise Exception(f"trying to register node type but module does not have identifiable Node class.")
-    if type_module.GraphNode.TYPE in ALLOWED_GRAPH_NODES and not re_register:
-        execution_reporting.warning(f"type {type_module.GraphNode.TYPE} already registered, and not allowed to reregister. skipping")
+    graph_node_ref = getattr(type_module, type_name+"GraphNode")
+    if graph_node_ref.TYPE != type_name:
+        execution_reporting.warning(f"registering node, type keys mismatched, going with what is written in file")
+    if graph_node_ref.TYPE in ALLOWED_GRAPH_NODES and not re_register:
+        execution_reporting.warning(f"type {graph_node_ref.TYPE} already registered, and not allowed to reregister. skipping")
     else:
-        ALLOWED_GRAPH_NODES[type_module.GraphNode.TYPE] = type_module
+        ALLOWED_GRAPH_NODES[graph_node_ref.TYPE] = type_module
 
 def parse_version_string(version_string):
     '''takes version string and returns tuple of three numbers representing version number
@@ -64,19 +69,19 @@ def parse_files(*file_names, existing_nodes = {}):
 
 def parse_file(file_name, existing_nodes={}):
     with open(file_name) as file:
-        dialog_logger.info(f"loading file {file_name}, with existing nodes {existing_nodes}")
+        parsing_logger.info(f"loading file <{file_name}>, with existing nodes <{existing_nodes}>")
         doc_dict = yaml.safe_load_all(file)
         for doc_ind, yaml_doc in enumerate(doc_dict):
-            dialog_logger.debug(f"parsing document indexed {doc_ind} from file '{file_name}'")
+            parsing_logger.debug(f"parsing document indexed <{doc_ind}> from file <{file_name}>")
             if yaml_doc is None or "nodes" not in yaml_doc or yaml_doc["nodes"] is None or len(yaml_doc["nodes"]) == 0:
-                dialog_logger.debug(f"file {file_name} document indexed {doc_ind} does not have list of nodes, moving to next")
+                parsing_logger.debug(f"file {file_name} document indexed {doc_ind} does not have list of nodes, moving to next")
                 continue
             
             for node_ind,yaml_node in enumerate(yaml_doc["nodes"]):
-                dialog_logger.debug(f"parsing node: file '{file_name}' doc: {doc_ind} node: {node_ind}")
+                parsing_logger.debug(f"parsing node: file <{file_name}> doc: <{doc_ind}> node: <{node_ind}>")
                 try:
                     node = parse_node(yaml_node)
-                    dialog_logger.debug(f"parsed node is {node.id}, existing are {existing_nodes.keys()}")
+                    parsing_logger.debug(f"parsed node is <{node.id}>, existing are <{existing_nodes.keys()}>")
                 except ValidationError as ve:
                     # validation failed. want to catch and print the error information in a format that is easier to debug than default.
                     # error printout on terminal still prints out the original version of the error before the custom one though
@@ -91,7 +96,7 @@ def parse_file(file_name, existing_nodes={}):
                 if node.id in existing_nodes:
                     raise Exception(f"node {node.id} has been redefined at file {file_name} doc {doc_ind} node {node_ind}")
                 existing_nodes[node.id] = node
-    dialog_logger.info(f"finished loading file {file_name}, found <{len(existing_nodes)}> nodes")
+    parsing_logger.info(f"finished loading file {file_name}, found <{len(existing_nodes)}> nodes")
     return existing_nodes
 
 def parse_node(yaml_node):
@@ -104,9 +109,9 @@ def parse_node(yaml_node):
     # make sure type definition already parsed as well
     if node_type not in NODE_DEFINITION_CACHE:
         try:
-            NODE_DEFINITION_CACHE[node_type] = yaml.safe_load(ALLOWED_GRAPH_NODES[node_type].GraphNode.DEFINITION)
+            NODE_DEFINITION_CACHE[node_type] = yaml.safe_load(getattr(ALLOWED_GRAPH_NODES[node_type], node_type+"GraphNode").DEFINITION)
             # dev creating node types should make sure schema for variables introduced by that type is valid
-            NODE_SCHEMA_CACHE[node_type] = yaml.safe_load(ALLOWED_GRAPH_NODES[node_type].GraphNode.SCHEMA)
+            NODE_SCHEMA_CACHE[node_type] = yaml.safe_load(getattr(ALLOWED_GRAPH_NODES[node_type],node_type+"GraphNode").SCHEMA)
         except Exception as e:
             raise Exception(f"tried to read node definition of '{node_type}' but couldn't. details: {e}") 
     
@@ -118,13 +123,13 @@ def parse_node(yaml_node):
         node_version = yaml_node["v"]
     
     if not node_version:
-        execution_reporting.warning(f"node found without version, assuming most recent of {ALLOWED_GRAPH_NODES[node_type].GraphNode.VERSION}")
-        node_version = ALLOWED_GRAPH_NODES[node_type].GraphNode.VERSION
+        execution_reporting.warning(f"node found without version, assuming most recent of {getattr(ALLOWED_GRAPH_NODES[node_type],node_type+'GraphNode').VERSION}")
+        node_version = getattr(ALLOWED_GRAPH_NODES[node_type],node_type+"GraphNode").VERSION
 
     actual_version = parse_version_string(node_version)
-    target_version = parse_version_string(ALLOWED_GRAPH_NODES[node_type].GraphNode.VERSION)
+    target_version = parse_version_string(getattr(ALLOWED_GRAPH_NODES[node_type],node_type+"GraphNode").VERSION)
     if actual_version[0] != target_version[0]:
-        raise Exception(f"read-in node version of {node_version} is too different from what is being used ({ALLOWED_GRAPH_NODES[node_type].GraphNode.VERSION}), please update yaml definition")
+        raise Exception(f"read-in node version of {node_version} is too different from what is being used ({getattr(ALLOWED_GRAPH_NODES[node_type],node_type+'GraphNode').VERSION}), please update yaml definition")
     # more checking version mismatches?
     
     #make sure schema structure for node is ok
@@ -149,9 +154,9 @@ def parse_node(yaml_node):
         else:
             graph_node_model[option["name"]] = yaml_node[option["name"]]
             #TODO: soon-future: Parsing callbacks, filters, events etc
-    ALLOWED_GRAPH_NODES[node_type].GraphNode.verify_format_data(graph_node_model)
+    getattr(ALLOWED_GRAPH_NODES[node_type],node_type+"GraphNode").verify_format_data(graph_node_model)
 
-    return ALLOWED_GRAPH_NODES[node_type].GraphNode(graph_node_model)
+    return getattr(ALLOWED_GRAPH_NODES[node_type],node_type+"GraphNode")(graph_node_model)
 
 def validate_format():
     #TODO: future QOL expansion?
