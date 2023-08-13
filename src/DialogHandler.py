@@ -31,6 +31,9 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: maybe fix cleaning so it doesn't stop if one node excepts? but what to do with that node that excepts when trying to stop and clear?
 #TODO: session and closing previous step nodes, want more control over nodes
 #TODO: create modal and message event support
+#TODO: saving and loading active nodes
+#TODO: maybe transition callback functions have a transition info paramter?
+#TODO: add enforcement for annotations of callbacks so can throw error when they don't match rest of yaml
 
 class DialogHandler():
     def __init__(self, nodes={}, functions={}, settings = {}, clean_freq_secs = 3, **kwargs) -> None:
@@ -359,12 +362,12 @@ class DialogHandler():
                     execution_reporting.debug(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> has transition filters {transition['transition_filters']}")
                     try:
                         filter_res = transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
+                        if isinstance(filter_res, bool) and filter_res:
+                            passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
+                                                        transition["session_chaining"] if "session_chaining" in transition else None, close_flag))
                     except Exception as e:
                         execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>. assuming skip")
                         dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>, details {e}")
-                    if isinstance(filter_res, bool) and filter_res:
-                        passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
-                                                    transition["session_chaining"] if "session_chaining" in transition else None, close_flag))
                 else:
                     passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
                                                transition["session_chaining"] if "session_chaining" in transition else None, close_flag))
