@@ -18,7 +18,7 @@ def build_button(component):
 
 def build_select_menu(component):
     select_comp_settings = {}
-    for v in ["custom_id","placeholder", "min_values","max_values", "disabled", "row"]:
+    for v in ["custom_id", "placeholder", "min_values", "max_values", "disabled", "row"]:
         if v in component:
             select_comp_settings[v] = component[v]
     
@@ -26,7 +26,7 @@ def build_select_menu(component):
 
     for option in component["options"]:
         option_settings = {}
-        for v in ["label", "description", "emoji", "default"]:
+        for v in ["label", "value", "description", "emoji", "default"]:
             if v in option:
                 option_settings[v] = option[v]
         select_comp.add_option(**option_settings)
