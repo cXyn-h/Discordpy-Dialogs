@@ -113,7 +113,15 @@ def is_reply(active_node, event, settings=None):
         return event.reference.message_id in [msg_info.message.id for msg_info in active_node.managed_replies]
     return False
 
+def selection_is(active_node, event, settings, goal_node=None):
+    print(event.data)
+    if event.data["component_type"] != discord.ComponentType.select.value:
+        return False
+    if event.data["custom_id"] != settings["custom_id"]:
+        return False
+    return len(event.data["values"]) == 1 and event.data["values"][0] == settings["selection"]
+
 dialog_func_info = {send_response:["callback"], send_message:["callback"], clear_buttons:["callback", "transition_callback"], 
                     clicked_this_menu:["filter"], button_is:["transition_filter"], remove_message:["callback"], 
                     is_session_user:["filter", "transition_filter"],session_link_user: ["transition_callback"],
-                    is_reply:["filter"]}
+                    is_reply:["filter"], selection_is:["filter", "transition_filter"]}

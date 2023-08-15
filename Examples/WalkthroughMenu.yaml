@@ -118,7 +118,7 @@ nodes:
                 - label: lorem Ipsum
                   description: filler
     events:
-      button_click:
+      select_menu:
         filters:
           - clicked_this_menu
           - is_session_user

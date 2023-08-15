@@ -33,7 +33,10 @@ class SimpleBot(Bot):
         #TODO: fill in once I know what to do with it, does the existing error of separate views with buttons with the same names not really being able to deal still exist in latest version?
         # print(f"bot on interaction entry point, interaction is <{interaction}>, type is <{interaction.type}> data is <{interaction.data}> ")
         if interaction.type == InteractionType.component:
-            await self.main_menu_handler.notify_event("button_click", interaction)
+            if interaction.data["component_type"] == discord.ComponentType.button.value:
+                await self.main_menu_handler.notify_event("button_click", interaction)
+            if interaction.data["component_type"] == discord.ComponentType.select.value:
+                await self.main_menu_handler.notify_event("select_menu", interaction)
         elif interaction.type == InteractionType.application_command:
             await self.main_menu_handler.notify_event("application_command", interaction)
         elif interaction.type == InteractionType.modal_submit:
