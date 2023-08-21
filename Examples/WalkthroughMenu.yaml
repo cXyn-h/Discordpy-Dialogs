@@ -56,8 +56,7 @@ nodes:
          - is_session_user
         transitions:
           - node_names: question2
-            session_chaining: chain
-            schedule_close: node
+            session_chaining: section
             transition_filters:
               - button_is: [sneep, snorp]
             transition_callbacks:
@@ -83,10 +82,10 @@ nodes:
       message:
         filters:
           - is_reply
+          - is_session_user
         transitions:
           - node_names: question3
-            session_chaining: chain
-            schedule_close: node
+            session_chaining: section
             transition_callbacks:
               - save_quiz_answer
       button_click:
@@ -124,8 +123,7 @@ nodes:
           - is_session_user
         transitions:
           - node_names: finishing
-            session_chaining: chain
-            schedule_close: node
+            session_chaining: section
             transition_callbacks:
               - save_quiz_answer
 

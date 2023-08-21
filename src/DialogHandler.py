@@ -3,6 +3,7 @@ import logging
 import sys # needed if custom handlers. currently setup a default set for this project in LoggingHelper
 import os
 import src.utils.LoggingHelper as logHelper
+import src.utils.SessionData as SessionData
 # asyncs
 import asyncio
 # timed things like TTL
@@ -20,6 +21,11 @@ dialog_logger = logging.getLogger('Dialog Handler')
 logHelper.use_default_setup(dialog_logger)
 dialog_logger.setLevel(logging.INFO)
 
+#cleaning is probably going to get really spammy so putting that in its own separate one to make debugging easier
+cleaning_logger = logging.getLogger("Dialog Cleaning")
+logHelper.use_default_setup(cleaning_logger)
+cleaning_logger.setLevel(logging.INFO)
+
 execution_reporting = logging.getLogger('Handler Reporting')
 logHelper.use_default_setup(execution_reporting)
 execution_reporting.setLevel(logging.DEBUG)
@@ -29,11 +35,12 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: validation for functions parameters
 #TODO: exception handling, how to direct output
 #TODO: maybe fix cleaning so it doesn't stop if one node excepts? but what to do with that node that excepts when trying to stop and clear?
-#TODO: session and closing previous step nodes, want more control over nodes
-#TODO: create modal and message event support
+#TODO: sessions making sure they work as intended
+#TODO: create modal support
 #TODO: saving and loading active nodes
 #TODO: maybe transition callback functions have a transition info paramter?
 #TODO: add enforcement for annotations of callbacks so can throw error when they don't match rest of yaml
+#TODO: should runtime be able to affect the node settings like next node to go to, callback list etc
 
 class DialogHandler():
     def __init__(self, nodes={}, functions={}, settings = {}, clean_freq_secs = 3, **kwargs) -> None:
@@ -75,7 +82,7 @@ class DialogHandler():
 
     def add_nodes(self, node_list = {}):
         #TODO: second pass ok and debug running
-        for node in node_list:
+        for node in node_list.values():
             if node.id in self.graph_nodes:
                 # possible exception, want to have setting for whether or not it gets thrown
                 execution_reporting.warning(f"tried adding <{node.id}>, but is duplicate. ignoring it.")
@@ -149,6 +156,7 @@ class DialogHandler():
     ################################################################################################'''
 
     async def start_at(self, node_id, event_key, event):
+        execution_reporting.debug(f"starting process to start at node <{node_id}>")
         if node_id not in self.graph_nodes:
             execution_reporting.warn(f"cannot start at <{node_id}>, not valid node")
             return None
@@ -157,11 +165,11 @@ class DialogHandler():
             execution_reporting.warn(f"cannot start at <{node_id}>, node settings do not allow")
             return None
         
-        dialog_logger.debug(f"starting custom filter process to start <{node_id}> with event <{event_key}>")
+        dialog_logger.debug(f"starting custom filter process to start <{node_id}> with event key <{event_key}> id'd <{id(event)}> oject type <{type(event)}>")
         active_node = graph_node.activate_node()
         start_filters = self.run_event_filters_on_node(active_node, event_key, event, start_version=True)
-        dialog_logger.debug(f"custom start filters result <{start_filters}>")
         if start_filters:
+            dialog_logger.info(f"starting node <{node_id}> with event key <{event_key}> id'd <{id(event)}>")
             await self.track_active_node(active_node, event)
             execution_reporting.info(f"started active version of <{node_id}>, unique id is <{id(active_node)}>")
             
@@ -177,12 +185,13 @@ class DialogHandler():
         event - `Any`
             the actual event data. handler itself doesn't care about what type it is, just make sure all the types of callback 
             specified via yaml can handle that type of event'''
+        dialog_logger.info(f"handler id'd <{id(self)}> has been notified of event happening. event key <{event_key}> id'd <{id(event)}> oject type <{type(event)}>")
         waiting_nodes = self.get_waiting_nodes(event_key)
-        dialog_logger.debug(f"nodes waiting for event <{event_key}> are <{waiting_nodes}>")
+        dialog_logger.debug(f"nodes waiting for event <{event_key}> are <{[str(id(x))+ ' ' +x.graph_node.id for x in waiting_nodes]}>")
         # don't use gather here, think it batches it so all nodes responding to event have to pass callbacks before any one of them go on to transitions
         # each node is mostly independent of others for each event and don't want them to wait for another node to finish
         notify_results = await asyncio.gather(*[self.run_event_on_node(node, event_key, event) for node in waiting_nodes])
-        dialog_logger.debug(f"notify results are <{notify_results}>")
+        dialog_logger.debug(f"results returned to notify method are <{notify_results}>")
 
     '''################################################################################################
     #
@@ -291,6 +300,7 @@ class DialogHandler():
         else:
             callbacks = active_node.graph_node.get_event_callbacks(event_key)
             execution_reporting.debug(f"running event callback. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, callbacks: <{callbacks}>")
+        
         try:
             for callback in callbacks:
                 if isinstance(callback, str):
@@ -364,13 +374,13 @@ class DialogHandler():
                         filter_res = transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
                         if isinstance(filter_res, bool) and filter_res:
                             passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
-                                                        transition["session_chaining"] if "session_chaining" in transition else None, close_flag))
+                                                        transition["session_chaining"] if "session_chaining" in transition else "end", close_flag))
                     except Exception as e:
                         execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>. assuming skip")
                         dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>, details {e}")
                 else:
                     passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
-                                               transition["session_chaining"] if "session_chaining" in transition else None, close_flag))
+                                               transition["session_chaining"] if "session_chaining" in transition else "end", close_flag))
 
         dialog_logger.debug(f"transitions that passed filters are for nodes <{[x[0] for x in passed_transitions]}>")
 
@@ -380,15 +390,19 @@ class DialogHandler():
             session = active_node.session
             if passed_transition[2] == "start" or (passed_transition[2] == "chain" and active_node.session is None):
                 dialog_logger.info(f"starting session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{passed_transition[0]}>")
+                #TODO: allow yaml specify timeout for sessions?
                 session = self.start_session()
                 dialog_logger.debug(f"session debugging, started new session, id is <{id(session)}>")
+
+            if passed_transition[2] == "section" and session is not None:
+                await self.clear_session_history(session)
 
             next_node = self.graph_nodes[passed_transition[0]].activate_node(session)
             execution_reporting.info(f"activated next node, is of graph node <{passed_transition[0]}>, id'd <{id(next_node)}>")
             if passed_transition[2] != "end" and session is not None:
                 dialog_logger.info(f"adding next node to session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{passed_transition[0]}>")
-                self.add_node_to_session(session, next_node)
-                dialog_logger.info(f"session debugging, session being chained. id <{id(session)}>, adding node <{id(next_node)}><{next_node.graph_node.id}> to it, now node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session['management']['nodes']]}>")
+                session.add_node(next_node)
+                dialog_logger.info(f"session debugging, session being chained. id <{id(session)}>, adding node <{id(next_node)}><{next_node.graph_node.id}> to it, now node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
                 
             for callback in passed_transition[1]:
                 if isinstance(callback, str):
@@ -442,37 +456,37 @@ class DialogHandler():
             await self.run_event_callbacks_on_node(active_node, "close", {"timed_out":timed_out}, closing_version=True)
 
         active_node.close_node()
-        if active_node.session and active_node.session is not None:
-            session_void = True
-            for node in active_node.session["management"]["nodes"]:
-                if node.is_active:
-                    session_void = False
-                    break
+        # this section closes the session if no other nodes in it are active. causing issues with sectioning session into steps (which clears recorded nodes when going to next step)
+        # if active_node.session and active_node.session is not None:
+        #     session_void = True
+        #     for node in active_node.session.get_linked_nodes():
+        #         if node.is_active:
+        #             session_void = False
+        #             break
             
-            if session_void:
-                await self.close_session(active_node.session)
+        #     if session_void:
+        #         await self.close_session(active_node.session)
 
-        if id(active_node) in self.active_nodes:     
+        if id(active_node) in self.active_nodes:
             del self.active_nodes[id(active_node)]
         for event in active_node.graph_node.get_events().keys():
             if event is not None and event in self.event_forwarding:
                 self.event_forwarding[event].remove(active_node)
 
     def start_session(self):
-        new_session = {"management":{"nodes":[]}}
+        new_session = SessionData.SessionData()
         self.sessions[id(new_session)] = new_session
         return new_session
     
-    def add_node_to_session(self, session, node):
-        #TODO: checking if node is already inside?
-        session["management"]["nodes"].append(node)
-
-    async def close_session(self, session):
-        execution_reporting.debug(f"closing session <{id(session)}>, current nodes <{[str(id(x))+ ' ' +x.graph_node.id for x in session['management']['nodes']]}>")
-        for node in session["management"]["nodes"]:
+    async def clear_session_history(self, session):
+        for node in session.get_linked_nodes():
             if node.is_active:
-                await self.close_node(node)
-        session["management"]["nodes"] = []
+                await self.close_node(node, timed_out=True)
+        session.clear_session_history()
+    
+    async def close_session(self, session):
+        execution_reporting.debug(f"closing session <{id(session)}>, current nodes <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
+        await self.clear_session_history(session)
         del self.sessions[id(session)]
         pass
 
@@ -552,7 +566,7 @@ class DialogHandler():
                 return False
             else:
                 return None
-        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose,active_node, event, goal_node, values))
+        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, values))
     
     '''################################################################################################
     #
@@ -575,7 +589,7 @@ class DialogHandler():
 
     async def clean_task(self, delay, prev_task):
         # keep a local reference as shared storage can be pointed to another place
-        dialog_logger.debug(f"clean task starting sleeping handler id <{id(self)}> task id <{id(self.cleaning_task)}>, task: {self.cleaning_task}")
+        cleaning_logger.debug(f"clean task starting sleeping handler id <{id(self)}> task id <{id(self.cleaning_task)}>, task: {self.cleaning_task}")
         this_cleaning = self.cleaning_task
 
         # first sleep because this should only happen every x seconds
@@ -583,7 +597,7 @@ class DialogHandler():
         starttime = datetime.utcnow()
         if not this_cleaning:
             # last catch for task canceled in case it happened while sleeping. don't need to continue cleaning. not likely to hit this line.
-            dialog_logger.info("seems like cleaning task already cancled. handler id <%s>, task id <%s>", id(self), id(this_cleaning))
+            cleaning_logger.info("seems like cleaning task already cancled. handler id <%s>, task id <%s>", id(self), id(this_cleaning))
             return
         try:
             await self.clean(this_cleaning)
@@ -591,22 +605,23 @@ class DialogHandler():
             sleep_secs = max(0, (timedelta(seconds=self.clean_freq_secs) - (datetime.utcnow() - starttime)).total_seconds())
             # tasks are only fire once, so need to set up the next round
             self.cleaning_task = asyncio.get_event_loop().create_task(self.clean_task(sleep_secs, this_cleaning))
-            dialog_logger.debug("cleaning task <%s> set up next task call <%s>", id(this_cleaning), id(self.cleaning_task))
+            cleaning_logger.debug("cleaning task <%s> set up next task call <%s>", id(this_cleaning), id(self.cleaning_task))
         except Exception as e:
             # last stop catch for exceptions just in case, otherwise will not be caught and aysncio will complain of unhandled exceptions
             execution_reporting.warning(f"error, abnormal state for handler's cleaning functions, cleaning is now stopped")
-            dialog_logger.warning("cleaning run for handler id <%s> at time <%s> failed. no more cleaning. error: <%s>", id(self), starttime, e)
+            cleaning_logger.warning("cleaning run for handler id <%s> at time <%s> failed. no more cleaning. error: <%s>", id(self), starttime, e)
 
 
     #NOTE: FOR CLEANING ALWAYS BE ON CAUTIOUS SIDE AND DO TRY EXCEPTS ESPECIALLY FOR CUSTOM HANDLING. maybe should throw out some data if that happens?
     async def clean(self, this_clean_task):
-        dialog_logger.debug("doing cleaning action. handler id <%s> task id <%s>", id(self), id(this_clean_task))
+        cleaning_logger.debug("doing cleaning action. handler id <%s> task id <%s>", id(self), id(this_clean_task))
         # clean out old data from internal stores
         now = datetime.utcnow()
         timed_out_nodes = []
         for node_key, active_node in self.active_nodes.items():
             if hasattr(active_node, "timeout"):
-                dialog_logger.debug(f"node <{id(active_node)}> of name <{active_node.graph_node.id}> timout is <{active_node.timeout}> and should be cleaned <{active_node.timeout < now}>")
+                cleaning_logger.debug(f"checking node <{id(active_node)}> of name <{active_node.graph_node.id}> timout is <{active_node.timeout}> and should be cleaned <{active_node.timeout < now}>")
+                
                 if active_node.timeout is not None and active_node.timeout < now:
                     timed_out_nodes.append(active_node)
 
@@ -618,13 +633,25 @@ class DialogHandler():
                 execution_reporting.warning(f"close node failed on node {id(node)}, just going to ignore it for now")
                 await self.close_node(node, timed_out=True, emergency_remove=True)
 
+        timed_out_sessions = []
+        for session in self.sessions.values():
+            cleaning_logger.debug(f"checking session <{id(session)}> timout is <{session.timeout}> and should be cleaned <{session.timeout < now}>")
+            if session.timeout < now:
+                timed_out_sessions.append(session)
+        
+        for session in timed_out_sessions:
+            try:
+                await self.close_session(session)
+            except Exception as e:
+                execution_reporting.warning(f"close session failed on session {id(session)}, just going to ignore it for now")
+
     def start_cleaning(self, event_loop=asyncio.get_event_loop()):
         'method to get the repeating cleaning task to start'
         self.cleaning_task = event_loop.create_task(self.clean_task(self.clean_freq_secs, None))
-        dialog_logger.info(f"starting cleaning. handler id <{id(self)}> task id <{id(self.cleaning_task)}>, <{self.cleaning_task}>")
+        cleaning_logger.info(f"starting cleaning. handler id <{id(self)}> task id <{id(self.cleaning_task)}>, <{self.cleaning_task}>")
 
     def stop_cleaning(self):
-        dialog_logger.info("stopping cleaning. handler id <%s> task id <%s>", id(self), id(self.cleaning_task))
+        cleaning_logger.info("stopping cleaning. handler id <%s> task id <%s>", id(self), id(self.cleaning_task))
         self.cleaning_task.cancel()
         self.cleaning_task = None
 

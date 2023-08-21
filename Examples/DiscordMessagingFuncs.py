@@ -86,20 +86,20 @@ def button_is(active_node, event, goal_node, custom_ids):
         return event.data["custom_id"] in custom_ids
 
 def is_session_user(active_node, event, goal_node=None):
-    if active_node.session is None or "user" not in active_node.session:
+    if active_node.session is None or "user" not in active_node.session.data:
         return False
     if isinstance(event, Interaction):
-        return active_node.session["user"].id == event.user.id
+        return active_node.session.data["user"].id == event.user.id
     else:
-        return active_node.session["user"].id == event.author.id
+        return active_node.session.data["user"].id == event.author.id
     
 def session_link_user(active_node, event, goal_node):
     if goal_node.session is None:
         return
     if isinstance(event, Interaction):
-        goal_node.session["user"] = event.user
+        goal_node.session.data["user"] = event.user
     else: 
-        goal_node.session["user"] = event.author
+        goal_node.session.data["user"] = event.author
 
 def is_reply(active_node, event, settings=None):
     secondary_categories = settings["categories"] if settings is not None else []

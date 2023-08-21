@@ -102,12 +102,13 @@ properties:
                                               items:
                                                 enum: ["node", "session"]
                                     session_chaining:
-                                        enum: ["start", "end", "chain"]
+                                        enum: ["start", "chain", "section"]
                                 required: [node_names]
                       unevaluatedProperties: false
         unevaluatedProperties: false
     TTL: 
         type: integer
+        minimum: -1
     close_callbacks:
         type: array
         items:
@@ -149,6 +150,7 @@ required: ["id"]
             setattr(self, key, option)
 
     def activate_node(self, session=None):
+        # node_ttl = min (self.TTL) if session is None else (min(self.TTL, session.time_left().total_seconds()) if self.TTL > 0 else session.time_left().total_seconds())
         return BaseNode(self, session, timeout_duration=timedelta(seconds=self.TTL))
     
     def get_start_filters(self, event_key):
@@ -207,19 +209,27 @@ class BaseNode():
         self.is_active = True
         self.handler = None
 
-        if self.graph_node.TTL == -1:
+        self.set_TTL(timeout_duration)
+
+    def set_TTL(self, timeout_duration=None):
+        if timeout_duration is None:
+            # should not really happen
+            timeout_duration = timedelta(self.graph_node.TTL)
+
+        if timeout_duration.total_seconds() == -1:
             # specifically, don't time out
             self.timeout = None
         else:
-            if timeout_duration == None:
-                # should never happen anyways
-                timeout_duration=timedelta(seconds=self.graph_node.TTL)
             self.timeout = datetime.utcnow() + timeout_duration
+
+    def time_left(self) -> timedelta:
+        return self.timeout - datetime.utcnow()
         
     def added_to_handler(self, handler):
         '''callback for when node is now being tracked by a handler that I don't want showing up in list of custom callbacks. if overriding
         child class, be sure to call parent'''
         #one handler per node. 
+        #TODO: probably want to remove this in future.
         self.handler = handler
 
     def close_node(self):
