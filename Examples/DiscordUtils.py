@@ -35,9 +35,9 @@ def build_select_menu(component_settings):
     return select_comp
 
 
-def build_discord_message(message_settings, TTL):
+def build_discord_message(message_settings, TTL, default_fills={}):
     ''' converts yaml settings to a dictionary for discord message constructor with all views and embeds etc components initialized'''
-    to_send_bits = {}
+    to_send_bits = default_fills
     if "components" in message_settings and message_settings["components"] is not None and len(message_settings["components"]) > 0:
         view = ui.View(timeout=TTL)
         for component in message_settings["components"]:
@@ -48,8 +48,6 @@ def build_discord_message(message_settings, TTL):
                 view.add_item(build_select_menu(component))
 
         to_send_bits["view"] = view
-    else: 
-        to_send_bits["view"] = None
 
     if "content" in message_settings and message_settings["content"] is not None:
         to_send_bits["content"] = message_settings["content"]

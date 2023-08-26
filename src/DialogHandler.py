@@ -113,24 +113,32 @@ class DialogHandler():
     #
     ################################################################################################'''
 
-    def register_function(self, func, permitted_purposes=[]):
-        if len(permitted_purposes) < 1:
+    def register_function(self, func, override_settings={}):
+        if hasattr(func, "allowed"):
+            permitted_purposes = func.allowed
+        if "allowed" in override_settings:
+            permitted_purposes = override_settings["allowed"]
+        
+        if not permitted_purposes or len(permitted_purposes) < 1:
             execution_reporting.warning(f"dialog handler tried registering a function <{func.__name__}> that does not have any permitted sections")
             return False
         if func == self.register_function:
             execution_reporting.warning("dialog handler tried registering own registration function, dropping for security reasions")
             return False
-        if func.__name__ in self.functions:
-            execution_reporting.warning(f"trying to register function <{func.__name__}> but function with that name already registered. if they are different functions with same name, contact dev.")
         
-        dialog_logger.debug(f"registered callback <{func}> for purposes: <{permitted_purposes}>")
+        if hasattr(func,"cb_key"):
+            cb_key = func.cb_key
+        else:
+            cb_key = func.__name__
+        if "cb_key" in override_settings:
+            cb_key = override_settings["cb_key"]
+        if cb_key in self.functions:
+            execution_reporting.warning(f"trying to register function <{func.__name__}> with key <{cb_key}> but key already registered. If different fuctions can change key to register. \
         #TODO: this needs upgrading if doing qualified names
-        self.functions[func.__name__]= {"ref":func, "permitted_purposes":permitted_purposes}
         return True
     
     def register_module(self, module):
-        for info in module.dialog_func_info.items():
-            self.register_function(info[0], info[1])
+        for func, overrides in module.dialog_func_info.items():
 
     def function_is_permitted(self, func_name, section, escalate_errors=False):
         '''if function is registered in handler and is permitted to run in the given section of handling and transitioning

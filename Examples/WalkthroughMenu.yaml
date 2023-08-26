@@ -6,7 +6,7 @@ nodes:
       message_command:
       slash_command:
     callbacks:
-      - send_message:
+      - edit_message:
           menu: true
           use_reply: true
           message:

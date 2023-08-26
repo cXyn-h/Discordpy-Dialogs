@@ -1,5 +1,6 @@
 import discord
 import Examples.DiscordMessagingFuncs as DiscordFuncs
+import src.utils.callbackUtils as cbUtils
 
 def save_quiz_answer(active_node, event, goal_node):
     if goal_node.session is None:
@@ -13,6 +14,7 @@ def save_quiz_answer(active_node, event, goal_node):
             goal_node.session.data["quiz"][active_node.graph_node.id] = event.data["custom_id"]
         elif event.data["component_type"] == discord.ComponentType.select.value:
             goal_node.session.data["quiz"][active_node.graph_node.id] = event.data["values"]
+cbUtils.set_callback_settings(save_quiz_answer, allowed=["transition_callback"])
     
 
 async def report_quiz_answers(active_node, event):
@@ -23,6 +25,7 @@ async def report_quiz_answers(active_node, event):
         await active_node.message.edit(content = message_to_send)
     else:
         await DiscordFuncs.send_message(active_node, event, settings={"use_reply": True, "message":{"content":message_to_send}})
+cbUtils.set_callback_settings(report_quiz_answers, allowed=["callback"])
         
 
-dialog_func_info= {save_quiz_answer:["transition_callback"], report_quiz_answers:["callback"]}
+dialog_func_info= {save_quiz_answer:{}, report_quiz_answers:{}}

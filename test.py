@@ -61,49 +61,59 @@ node_list = parsing.parse_files("justMessingWithYaml.yaml","v2/revampedReporting
 #     print(k,":",vars(v))
 
 '''setting up functions for handler event testing'''
+import src.utils.callbackUtils as FI
+@FI.callback_settings(allowed=["filter"])
 def testfilter_1(active_node, event):
     print(f"callback for testfilter_1 happened, passed in info: active node id {id(active_node)}")
     # raise Exception("testing")
     return True
 
+@FI.callback_settings(allowed=["filter"], has_parameter="optional")
 def testfilter_2(active_node, event, args):
     print(f"callback for testfilter_2 happened, passed in info: active node id {id(active_node)}")
     return False
 
+@FI.callback_settings(allowed=["callback"], has_parameter="optional")
 def test_optional_parameters(active_node, event, args=None):
     print(f"callback for test_optional_parameters happened, passed in info: active node id {id(active_node)}, args are {args}")
 
+@FI.callback_settings(allowed=["filter","callback"], has_parameter="optional")
 def filter_exception(active_node, event, args=None):
     raise Exception("testing")
 
+@FI.callback_settings(allowed=["filter"], has_parameter="always")
 def check_from(active_node, event, args):
     print(f"callback for check_from happened, passed in info: active node id {id(active_node)}, args {args}")
     return True
 
+@FI.callback_settings(allowed=["callback"])
 async def test_cb1(active_node, event):
     print(f"callback for test_cb1, passed in info: active node id {id(active_node)}")
 
+@FI.callback_settings(allowed=["callback"], has_parameter="always")
 def test_cb2(active_node, event, args):
     print(f"callback for test_cb2, passed in info: active node id {id(active_node)}")
 
+@FI.callback_settings(allowed=["transition_filter"])
 def ok_to_transition(active_node, event, goal_node):
     print(f"callback for ok_to_transition happened, passed in info: active node id {id(active_node)}, goal {goal_node}")
     return True
 
+@FI.callback_settings(allowed=["transition_callback"], has_parameter="optional")
 def test_t_callback_1(active_node, event, goal_node, args=None):
     pass
 
 async def handler_testing():
     h = DialogHandler3.DialogHandler(nodes=node_list, test_var = 5)
-    h.register_function(testfilter_1, ["filter"])
-    h.register_function(testfilter_2, ["filter"])
-    h.register_function(filter_exception, ["filter","callback"])
-    h.register_function(check_from, ["filter"])
-    h.register_function(test_cb1, ["callback"])
-    h.register_function(test_cb2, ["callback"])
-    h.register_function(test_optional_parameters,["callback"])
-    h.register_function(ok_to_transition, ["transition_filter"])
-    h.register_function(test_t_callback_1, ["transition_callback"])
+    h.register_function(testfilter_1)
+    h.register_function(testfilter_2)
+    h.register_function(filter_exception)
+    h.register_function(check_from)
+    h.register_function(test_cb1)
+    h.register_function(test_cb2)
+    h.register_function(test_optional_parameters)
+    h.register_function(ok_to_transition)
+    h.register_function(test_t_callback_1)
     h.start_cleaning()
     # h.setup_from_files(["justMessingWithYaml.yaml"])
     print("----------Handlerv3--------")
