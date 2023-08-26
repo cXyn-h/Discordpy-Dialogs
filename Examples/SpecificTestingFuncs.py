@@ -22,7 +22,7 @@ async def report_quiz_answers(active_node, event):
     if hasattr(active_node, "message") and active_node.message is not None:
         await active_node.message.edit(content = message_to_send)
     else:
-        await DiscordFuncs.send_response(active_node, event, message_settings={"content":message_to_send})
+        await DiscordFuncs.send_message(active_node, event, settings={"use_reply": True, "message":{"content":message_to_send}})
         
 
 dialog_func_info= {save_quiz_answer:["transition_callback"], report_quiz_answers:["callback"]}

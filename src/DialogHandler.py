@@ -41,6 +41,7 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: maybe transition callback functions have a transition info paramter?
 #TODO: add enforcement for annotations of callbacks so can throw error when they don't match rest of yaml
 #TODO: should runtime be able to affect the node settings like next node to go to, callback list etc
+#TODO: Templating yaml?
 
 class DialogHandler():
     def __init__(self, nodes={}, functions={}, settings = {}, clean_freq_secs = 3, **kwargs) -> None:
@@ -430,6 +431,9 @@ class DialogHandler():
         #TODO: fine tune id for active nodes
         dialog_logger.info(f"adding node <{id(active_node)}><{active_node.graph_node.id}> to internal tracking")
         self.active_nodes[id(active_node)] = active_node
+        #TODO: discord example depends on this function being called before callbacks are. either find another way to pass bot reference to callbacks
+        #   or revisit whether or not I want this strictly called after officially being added and if that only happens after callbacks
+        active_node.added_to_handler(self)
 
         for callback in active_node.graph_node.callbacks:
             if isinstance(callback, str):
@@ -443,7 +447,6 @@ class DialogHandler():
             if listed_event not in self.event_forwarding:
                 self.event_forwarding[listed_event] = set()
             self.event_forwarding[listed_event].add(active_node)
-        active_node.added_to_handler(self)
         
         # is autoremoval if not waiting for anything, but found there might be cases where want to keep node around
         # if len(active_node.graph_node.get_events()) < 1:
@@ -654,4 +657,9 @@ class DialogHandler():
         cleaning_logger.info("stopping cleaning. handler id <%s> task id <%s>", id(self), id(self.cleaning_task))
         self.cleaning_task.cancel()
         self.cleaning_task = None
+
+    def __del__(self):
+        if len(self.sessions) > 0 or len(self.active_nodes) > 0:
+            dialog_logger.warning(f"destrucor for handler. id'd <{id(self)}> sanity checking any memory leaks, may not be major thing \
+                                  sessions left: <{self.sessions}>, nodes left: <{self.active_nodes}>")
 

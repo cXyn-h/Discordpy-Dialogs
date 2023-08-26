@@ -6,17 +6,20 @@ nodes:
       message_command:
       slash_command:
     callbacks:
-      - send_response:
-          content: Welcome to the Testing Quiz!
-          components:
-            - custom_id: begin
-              type: Button
-              style: success
-              label: begin?
-            - custom_id: stop
-              type: Button
-              style: red
-              label: no.
+      - send_message:
+          menu: true
+          use_reply: true
+          message:
+            content: Welcome to the Testing Quiz!
+            components:
+              - custom_id: begin
+                type: Button
+                style: success
+                label: begin?
+              - custom_id: stop
+                type: Button
+                style: red
+                label: no.
     events:
       button_click:
         filters:
@@ -29,26 +32,27 @@ nodes:
               - button_is: begin
             transition_callbacks:
               - session_link_user
-              - clear_buttons
+              - transfer_menu
 
   - id: question1
     type: Base
     version: "3.5.0"
-    close_callbacks:
-      - remove_message
     callbacks:
-      - send_response:
-          content: "Please note if you do not finish you will need to restart. Choice 1:"
-          components:
-            - label: "sneep"
-              custom_id: "sneep"
-              type: Button
-            - label: "snorp"
-              custom_id: "snorp"
-              type: Button
-            - label: "help"
-              custom_id: "help1"
-              type: Button
+      - edit_message:
+          menu: true
+          use_reply: true
+          message:
+            content: "Please note if you do not finish you will need to restart. Choice 1:"
+            components:
+              - label: "sneep"
+                custom_id: "sneep"
+                type: Button
+              - label: "snorp"
+                custom_id: "snorp"
+                type: Button
+              - label: "help"
+                custom_id: "help1"
+                type: Button
     events:
       button_click:
         filters:
@@ -61,6 +65,7 @@ nodes:
               - button_is: [sneep, snorp]
             transition_callbacks:
               - save_quiz_answer
+              - transfer_menu
           - node_names: help1
             session_chaining: chain
             transition_filters:
@@ -72,12 +77,15 @@ nodes:
     close_callbacks:
       - remove_message
     callbacks:
-      - send_response:
-          content: "ok question 2, reply with text"
-          components:
-            - label: "help"
-              custom_id: "help2"
-              type: Button
+      - edit_message:
+          menu: true
+          use_reply: true
+          message:
+            content: "ok question 2, reply with text"
+            components:
+              - label: "help"
+                custom_id: "help2"
+                type: Button
     events:
       message:
         filters:
@@ -103,19 +111,22 @@ nodes:
     close_callbacks:
       - remove_message
     callbacks:
-      - send_response:
-          content: "ok choice 3, ahajdljigrijrgjlihlthljthlj"
-          components:
-            - custom_id: q3_select
-              type: SelectMenu
-              options:
-                - label: asdf
-                  description: don't know what else
-                  default: true
-                - label: qwerty
-                  description: is this your keyboard?
-                - label: lorem Ipsum
-                  description: filler
+      - send_message:
+          menu: true
+          use_reply: true
+          message:
+            content: "ok choice 3, ahajdljigrijrgjlihlthljthlj"
+            components:
+              - custom_id: q3_select
+                type: SelectMenu
+                options:
+                  - label: asdf
+                    description: don't know what else
+                    default: true
+                  - label: qwerty
+                    description: is this your keyboard?
+                  - label: lorem Ipsum
+                    description: filler
     events:
       select_menu:
         filters:
@@ -141,13 +152,19 @@ nodes:
     close_callbacks:
       - remove_message
     callbacks:
-      - send_response:
-          content: "Yes, make a choice"
+      - send_message:
+          menu: true
+          use_reply: true
+          message:
+            content: "Yes, make a choice"
   - id: help2
     type: Base
     version: "3.5.0"
     close_callbacks:
       - remove_message
     callbacks:
-      - send_response:
-          content: "pls save"
+      - send_message:
+          menu: true
+          use_reply: true
+          message:
+            content: "pls save"

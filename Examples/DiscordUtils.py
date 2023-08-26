@@ -6,25 +6,27 @@ class MessageInfo:
         self.view = view
         self.deleted = False
 
-def build_button(component):
-    button_comp_settings = {}
-    for v in ["custom_id","label", "disabled","url","emoji","row"]:
-        if v in component:
-            button_comp_settings[v] = component[v]
+def build_button(button_settings):
+    '''builds a discord ui button component from settings listed in a dictionary'''
+    filtered_settings = {}
+    for setting in ["custom_id", "label", "disabled", "url", "emoji", "row"]:
+        if setting in button_settings:
+            filtered_settings[setting] = button_settings[setting]
 
-    if "style" in component:
-        button_comp_settings["style"] = discord.ButtonStyle[component["style"]]
-    return ui.Button(**button_comp_settings)
+    if "style" in button_settings:
+        filtered_settings["style"] = discord.ButtonStyle[button_settings["style"]]
+    return ui.Button(**filtered_settings)
 
-def build_select_menu(component):
-    select_comp_settings = {}
+def build_select_menu(component_settings):
+    '''builds a discord select ui component from settings listed in a nested dictionary'''
+    filtered_settings = {}
     for v in ["custom_id", "placeholder", "min_values", "max_values", "disabled", "row"]:
-        if v in component:
-            select_comp_settings[v] = component[v]
+        if v in component_settings:
+            filtered_settings[v] = component_settings[v]
     
-    select_comp = ui.Select(**select_comp_settings)
+    select_comp = ui.Select(**filtered_settings)
 
-    for option in component["options"]:
+    for option in component_settings["options"]:
         option_settings = {}
         for v in ["label", "value", "description", "emoji", "default"]:
             if v in option:
@@ -46,6 +48,8 @@ def build_discord_message(message_settings, TTL):
                 view.add_item(build_select_menu(component))
 
         to_send_bits["view"] = view
+    else: 
+        to_send_bits["view"] = None
 
     if "content" in message_settings and message_settings["content"] is not None:
         to_send_bits["content"] = message_settings["content"]
@@ -56,17 +60,26 @@ def build_discord_message(message_settings, TTL):
             embed.add_field(**field)
     return to_send_bits
 
-def buidl_discord_modal():
+def build_discord_modal():
     #TODO
     pass
 
-def record_sent_message(active_node, msg_info):
+def record_sent_message(active_node, msg_info, is_menu=False):
     if not hasattr(active_node, "secondary_messages"):
         active_node.secondary_messages = set()
-    if not hasattr(active_node, "focal_message") or active_node.focal_message is None:
+    if is_menu:
         # if haven't recorded focal, assuming first send response is going to be focal ie is the message doing the most important interaction and chaining stuff
-        active_node.focal_message = msg_info
+        active_node.menu_message = msg_info
+        # print(f"active node id'd <{id(active_node)}> set message snowflake id'd <{id(msg_info.message.id)}> <{msg_info.message.content}> to menu message")
     else:
         active_node.secondary_messages.add(msg_info)
+        # print(f"active node id'd <{id(active_node)}> added message snowflake id'd <{id(msg_info.message.id)}> <{msg_info.message.content}> to secondary messages")
+    if not hasattr(active_node, "menu_message"):
+        active_node.menu_message = None
     if not hasattr(active_node, "managed_replies"):
         active_node.managed_replies = set()
+
+def record_reply(active_node, msg_info):
+    if not hasattr(active_node, "managed_replies"):
+        active_node.managed_replies = set()
+    active_node.managed_replies.add(msg_info)
