@@ -8,21 +8,15 @@ class BaseGraphNode():
     DEFINITION='''
 options:
   - name: id
-    presence: required
   - name: start
-    presence: optional
     default: Null
   - name: TTL
-    presence: optional
     default: 180
   - name: callbacks
-    presence: optional
     default: []
   - name: events
-    presence: optional
     default: {}
   - name: close_callbacks
-    presence: optional
     default: []
 '''
     SCHEMA='''
@@ -145,7 +139,8 @@ required: ["id"]
         #                         transition["transition_callbacks"][ind] = {transition_filter:None}
         pass
 
-    def __init__(self, options) -> None:
+    def __init__(self, options:dict) -> None:
+        self.__class__.verify_format_data(options)
         for key, option in options.items():
             setattr(self, key, option)
 
