@@ -44,9 +44,9 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: Templating yaml?
 
 class DialogHandler():
-    def __init__(self, nodes={}, functions={}, settings = {}, clean_freq_secs = 3, **kwargs) -> None:
-        self.graph_nodes = nodes
-        self.functions=functions
+    def __init__(self, nodes=None, functions=None, settings = None, clean_freq_secs = 3, **kwargs) -> None:
+        self.graph_nodes = nodes if nodes is not None else {}
+        self.functions=functions if functions is not None else {}
 
         self.active_nodes={}
         self.event_forwarding={}
@@ -57,7 +57,7 @@ class DialogHandler():
 
         #TODO: still need to integrate and use these settings everywhere, especially the reading sections
         #       but before doing that probably want to think through what reporting will look like, where should reports go: dev, operator, server logs, bot logs?
-        self.settings = settings
+        self.settings = settings if settings is not None else {}
         if "exception_level" not in self.settings:
             self.settings["exception_level"] = "ignore"
 

@@ -1,4 +1,6 @@
-def callback_settings(documentation={}, allowed=[], has_parameter:str=None, cb_key=None):
+import copy
+#TODO: implement schema/documentation for callbacks and validation using it
+def callback_settings(documentation:dict=None, allowed:list=None, has_parameter:str=None, cb_key=None):
     '''decorator to record settings for how to use function in callbacks. Records settings as attributes on function
     has to be first in decorator list on a function. if can't, use builtin setattr or provided set_callback_settings
     
@@ -14,7 +16,7 @@ def callback_settings(documentation={}, allowed=[], has_parameter:str=None, cb_k
         key that will be used in yaml to specify this function'''
     return lambda func: set_callback_settings(func=func, documentation=documentation, allowed=allowed, has_parameter=has_parameter, cb_key=cb_key)
 
-def set_callback_settings(func, documentation={}, allowed=[], has_parameter:str=None, cb_key:str=None):
+def set_callback_settings(func, documentation:dict=None, allowed:list=None, has_parameter:str=None, cb_key:str=None):
     '''function that sets the settings on the functions made for callbacks.
     
     Parameters
@@ -27,8 +29,8 @@ def set_callback_settings(func, documentation={}, allowed=[], has_parameter:str=
         whether the function always needs, optionally takes, or never takes a parameter
     `cb_key` - str
         key that will be used in yaml to specify this function'''
-    func.allowed = allowed
-    func.documentation = documentation
+    func.allowed = allowed if allowed is not None else  []
+    func.documentation = documentation if documentation is not None else {}
     func.has_parameter = has_parameter
     func.cb_key = cb_key or func.__name__
     return func

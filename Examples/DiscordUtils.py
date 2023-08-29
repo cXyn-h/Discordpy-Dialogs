@@ -1,5 +1,7 @@
 import discord
 from discord import ui
+import copy
+
 class MessageInfo:
     def __init__(self, message, view=None) -> None:
         self.message = message
@@ -37,7 +39,8 @@ def build_select_menu(component_settings):
 
 def build_discord_message(message_settings, TTL, default_fills={}):
     ''' converts yaml settings to a dictionary for discord message constructor with all views and embeds etc components initialized'''
-    to_send_bits = default_fills
+    #NOTE: don't forget that default values are evaluated once, and mutable objects will be the same object every call
+    to_send_bits = copy.deepcopy(default_fills)
     if "components" in message_settings and message_settings["components"] is not None and len(message_settings["components"]) > 0:
         view = ui.View(timeout=TTL)
         for component in message_settings["components"]:
