@@ -131,14 +131,23 @@ class DialogHandler():
         else:
             cb_key = func.__name__
         if "cb_key" in override_settings:
+            execution_reporting.warning(f"doing manual override to register function with key <{override_settings['cb_key']}> instead of usual <{cb_key}>")
             cb_key = override_settings["cb_key"]
         if cb_key in self.functions:
-            execution_reporting.warning(f"trying to register function <{func.__name__}> with key <{cb_key}> but key already registered. If different fuctions can change key to register. \
+            # this is an exception so that developer can know as soon as possible instead of silently ignoring second one and causeing confusion 
+            # why the function isn't being called
+            raise Exception(f"trying to register function <{func.__name__}> with key <{cb_key}> but key already registered. " +\
+                                        f"If they are different fuctions, can change key to register by. "+ \
+                                        "be aware yaml has to match the key registered with")
+        
+        dialog_logger.debug(f"registered callback <{func}> with key <{cb_key}> for purposes: <{permitted_purposes}>")
         #TODO: this needs upgrading if doing qualified names
+        self.functions[cb_key]= {"ref":func, "permitted_purposes":permitted_purposes}
         return True
     
     def register_module(self, module):
         for func, overrides in module.dialog_func_info.items():
+            self.register_function(func, overrides)
 
     def function_is_permitted(self, func_name, section, escalate_errors=False):
         '''if function is registered in handler and is permitted to run in the given section of handling and transitioning
@@ -393,6 +402,8 @@ class DialogHandler():
 
         dialog_logger.debug(f"transitions that passed filters are for nodes <{[x[0] for x in passed_transitions]}>")
 
+        #TODO: ordering gauranttes for order of transitions processed? technically a node with multiple transitions, 
+        #   when running transition callbacks the node data for the next transitions can be different from previous
         directives = [False, False]
         for passed_transition in passed_transitions:
             execution_reporting.info(f"doing transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{passed_transition[0]}> callbacks are <{passed_transition[1]}>")
