@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timedelta
 # for identifying if functions are coroutines for callbacks
 import inspect
+import copy
 
 import src.DialogNodeParsing as nodeParser
 
@@ -36,12 +37,14 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: exception handling, how to direct output
 #TODO: maybe fix cleaning so it doesn't stop if one node excepts? but what to do with that node that excepts when trying to stop and clear?
 #TODO: sessions making sure they work as intended
+#TODO: refine how nodes and sessions lifetimes interact
 #TODO: create modal support
 #TODO: saving and loading active nodes
 #TODO: maybe transition callback functions have a transition info paramter?
 #TODO: add enforcement for annotations of callbacks so can throw error when they don't match rest of yaml
 #TODO: should runtime be able to affect the node settings like next node to go to, callback list etc
 #TODO: Templating yaml?
+#TODO: go through code fine sweep for anything that could be changing data meant to be read
 
 class DialogHandler():
     def __init__(self, nodes=None, functions=None, settings = None, clean_freq_secs = 3, **kwargs) -> None:
@@ -57,7 +60,7 @@ class DialogHandler():
 
         #TODO: still need to integrate and use these settings everywhere, especially the reading sections
         #       but before doing that probably want to think through what reporting will look like, where should reports go: dev, operator, server logs, bot logs?
-        self.settings = settings if settings is not None else {}
+        self.settings = copy.deepcopy(settings) if settings is not None else {}
         if "exception_level" not in self.settings:
             self.settings["exception_level"] = "ignore"
 
@@ -82,6 +85,8 @@ class DialogHandler():
         self.graph_nodes=nodeParser.parse_files(*file_names, existing_nodes={})
 
     def add_nodes(self, node_list = {}):
+        '''add all nodes in list into handler. gives a warning on duplicates
+         dev note: assumed handler is now responsible for the objects passed in'''
         #TODO: second pass ok and debug running
         for node in node_list.values():
             if node.id in self.graph_nodes:
@@ -94,11 +99,11 @@ class DialogHandler():
     def add_files(self, file_names=[]):
         #TODO: second pass ok and debug running
         # note if trying to create a setting to ignore redifinition exceptions, this won't work since can't sort out redefinitions exceptions from rest
-        nodeParser.parse_files(*file_names, self.graph_nodes)
+        nodeParser.parse_files(*file_names, existing_nodes=self.graph_nodes)
 
     def reload_files(self, file_names=[]):
         updated_nodes = nodeParser.parse_files(*file_names, existing_nodes={})
-        for k,node in updated_nodes.items():
+        for k, node in updated_nodes.items():
             execution_reporting.info(f"updated/created node {node.id}")
             self.graph_nodes[k] = node
 
@@ -174,23 +179,29 @@ class DialogHandler():
     ################################################################################################'''
 
     async def start_at(self, node_id, event_key, event):
-        execution_reporting.debug(f"starting process to start at node <{node_id}>")
+        execution_reporting.debug(f"starting process to start at node <{node_id}> with event <{event_key}> id'd <{id(event)}> type <{type(event)}>")
         if node_id not in self.graph_nodes:
             execution_reporting.warn(f"cannot start at <{node_id}>, not valid node")
             return None
         graph_node = self.graph_nodes[node_id]
-        if graph_node.start is None or (isinstance(graph_node.start, bool) and not graph_node.start):
+        if graph_node.start is None:
             execution_reporting.warn(f"cannot start at <{node_id}>, node settings do not allow")
             return None
         
         dialog_logger.debug(f"starting custom filter process to start <{node_id}> with event key <{event_key}> id'd <{id(event)}> oject type <{type(event)}>")
-        active_node = graph_node.activate_node()
+        if graph_node.start_with_session(event_key):
+            session = SessionData.SessionData()
+        else:
+            session = None
+        active_node = graph_node.activate_node(session)
+        await self.run_event_callbacks_on_node(active_node, event_key, event, version="start")
         start_filters = self.run_event_filters_on_node(active_node, event_key, event, start_version=True)
         if start_filters:
             dialog_logger.info(f"starting node <{node_id}> with event key <{event_key}> id'd <{id(event)}>")
             await self.track_active_node(active_node, event)
             execution_reporting.info(f"started active version of <{node_id}>, unique id is <{id(active_node)}>")
-            
+            session.add_node(active_node)
+            self.register_session(session)
 
     async def notify_event(self, event_key:str, event):
         '''entrypoint for event happening and getting node responses to event. Once handler is notified, it sends out the event info
@@ -270,7 +281,7 @@ class DialogHandler():
             node_filters = []
         dialog_logger.debug(f"filters from node are {node_filters}")
         if start_version:
-            dialog_logger.debug(f"running start version of filters on node {active_node}, start filters are {active_node.graph_node.start}")
+            dialog_logger.debug(f"running start version of filters on node {active_node}, start filters are {active_node.graph_node.get_start_filters(event_key)}")
             node_filters.extend(active_node.graph_node.get_start_filters(event_key))
         else:
             node_filters.extend(active_node.graph_node.get_event_filters(event_key))
@@ -310,9 +321,17 @@ class DialogHandler():
             return False
     
 
-    async def run_event_callbacks_on_node(self, active_node, event_key, event, closing_version = False):
-        '''runs all callbacks for a node event pair'''
-        if closing_version:
+    async def run_event_callbacks_on_node(self, active_node, event_key, event, version = None):
+        '''runs all callbacks for a node event pair
+        
+        Parameters:
+        ---
+        closing_version - `str`
+            "start", "close", or None'''
+        if version == "start":
+            callbacks = active_node.graph_node.get_start_callbacks(event_key)
+            execution_reporting.debug(f"running start callbacks. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, callbacks: <{callbacks}>")
+        elif version == "close":
             callbacks = active_node.graph_node.get_close_callbacks()
             execution_reporting.debug(f"running closing callbacks. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, callbacks: <{callbacks}>")
         else:
@@ -411,7 +430,8 @@ class DialogHandler():
             if passed_transition[2] == "start" or (passed_transition[2] == "chain" and active_node.session is None):
                 dialog_logger.info(f"starting session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{passed_transition[0]}>")
                 #TODO: allow yaml specify timeout for sessions?
-                session = self.start_session()
+                session = SessionData.SessionData()
+                self.register_session(session)
                 dialog_logger.debug(f"session debugging, started new session, id is <{id(session)}>")
 
             if passed_transition[2] == "section" and session is not None:
@@ -475,7 +495,7 @@ class DialogHandler():
     async def close_node(self, active_node, timed_out=False, emergency_remove = False):
         execution_reporting.info(f"closing node <{id(active_node)}><{active_node.graph_node.id}> timed out? <{timed_out}>")
         if not emergency_remove:
-            await self.run_event_callbacks_on_node(active_node, "close", {"timed_out":timed_out}, closing_version=True)
+            await self.run_event_callbacks_on_node(active_node, "close", {"timed_out":timed_out}, version=True)
 
         active_node.close_node()
         # this section closes the session if no other nodes in it are active. causing issues with sectioning session into steps (which clears recorded nodes when going to next step)
@@ -495,10 +515,8 @@ class DialogHandler():
             if event is not None and event in self.event_forwarding:
                 self.event_forwarding[event].remove(active_node)
 
-    def start_session(self):
-        new_session = SessionData.SessionData()
-        self.sessions[id(new_session)] = new_session
-        return new_session
+    def register_session(self, session):
+        self.sessions[id(session)] = session
     
     async def clear_session_history(self, session):
         for node in session.get_linked_nodes():
@@ -576,8 +594,8 @@ class DialogHandler():
                 return None
         func_ref = self.functions[func_name]["ref"]
         if inspect.iscoroutinefunction(func_ref):
-            return await self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, values))
-        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose,active_node, event, goal_node, values))
+            return await self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
+        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose,active_node, event, goal_node, copy.deepcopy(values)))
     
 
     #NOTE: keep this function in sync with asynchronous version
@@ -588,7 +606,7 @@ class DialogHandler():
                 return False
             else:
                 return None
-        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, values))
+        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
     
     '''################################################################################################
     #

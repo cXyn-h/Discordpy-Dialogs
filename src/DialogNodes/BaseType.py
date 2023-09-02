@@ -46,6 +46,12 @@ properties:
                             type: array
                             items:
                                 type: ["string", "object"]
+                        session_chaining:
+                            enum: ["start"]
+                        setup:
+                            type: array
+                            items:
+                                type: ["string", "object"]
                       unevaluatedProperties: false
         unevaluatedProperties: false
     events:
@@ -112,7 +118,7 @@ required: ["id"]
     TYPE="Base"
 
     @classmethod
-    def verify_format_data(cls, data):
+    def verify_format_data(cls, data:dict):
         '''WIP. need some way to verify data is in right format. not sure which way yet'''
         # for ind, callback in enumerate(data["callbacks"]):
         #     if isinstance(callback, str):
@@ -153,6 +159,15 @@ required: ["id"]
             return self.start[event_key]["filters"]
         else:
             return []
+        
+    def get_start_callbacks(self, event_key):
+        if (self.start is not None) and (event_key in self.start) and (self.start[event_key] is not None) and ("setup" in self.start[event_key]):
+            return self.start[event_key]["setup"]
+        else:
+            return []
+        
+    def start_with_session(self, event_key):
+        return (self.start is not None) and (event_key in self.start) and (self.start[event_key] is not None) and ("session_chaining" in self.start[event_key])
     
     def get_events(self):
         if self.events is None:
