@@ -9,10 +9,12 @@ async def edit_message(active_node, event, settings):
     '''callback function that edits the discord messsage for this node's menu message, or sends a new one if it doesn't exist. 
     Each node has one menu message that represents what message it is waiting for interactions or replies on'''
     #TODO: extra tests
+    # print(f"edit message function called, active node <{id(active_node)}><{active_node.graph_node.id}> event is <{event}>, parameters is <{settings}>")
     if not hasattr(active_node, "menu_message") or active_node.menu_message is None:
         # print(f"edit message callback found no menu message recorded for active node id'd <{id(active_node)}><{active_node.graph_node.id}>")
         await send_message(active_node, event, settings)
         return
+    
     to_send_bits = DiscordUtils.build_discord_message(settings["message"], active_node.graph_node.TTL, default_fills={"view":None})
     if isinstance(event, Interaction):
         if not event.response.is_done():
@@ -21,13 +23,29 @@ async def edit_message(active_node, event, settings):
         else:
             # print(f"callback using interation event. ERROR? response done already")
             await active_node.menu_message.message.edit(**to_send_bits)
-
     else:
         await active_node.menu_message.message.edit(**to_send_bits)
+
     if "view" in to_send_bits:
         active_node.menu_message.view.stop()
         active_node.menu_message.view = to_send_bits["view"]
 cbUtils.set_callback_settings(edit_message, has_parameter="always", allowed=["callback"])
+
+async def send_DM(active_node, event, settings):
+    if isinstance(event, Interaction):
+        user = event.user
+    else:
+        user = event.author
+    
+    dm_channel = user.dm_channel
+    if dm_channel == None:
+        dm_channel = await user.create_dm()
+
+    if "redirect" not in settings:
+        settings["redirect"] = {}
+    settings["redirect"]["dest_channel_id"] = dm_channel.id
+    await send_message(active_node, event, settings)
+cbUtils.set_callback_settings(send_DM, has_parameter="always", allowed=["callback"])
 
 async def send_message(active_node, event, settings):
     '''callback function that sends a discord message with provided settings, can handle redirecting to another channel.'''
@@ -59,8 +77,9 @@ async def send_message(active_node, event, settings):
         else:
             sent_message = await event.channel.send(**message_components)
     else:
-        if "use_reply" in settings and settings["use_reply"]:
-            sent_message = await event.reply(**message_components)
+        if "use_reply" in settings:
+            print(f"using reply, will it ping? {True if settings['use_reply'] == 'ping' else False}")
+            sent_message = await event.reply(**message_components, allowed_mentions=discord.AllowedMentions(replied_user=True if settings["use_reply"] == "ping" else False))
         else:
             sent_message = await event.channel.send(**message_components)
 
@@ -92,9 +111,11 @@ def clicked_this_menu(active_node, event):
     return event.message.id == active_node.menu_message.message.id
 cbUtils.set_callback_settings(clicked_this_menu, allowed=["filter"])
 
-async def remove_message(active_node, event):
+async def remove_message(active_node, event, settings=None):
     '''callback function that deletes all discord messages recorded as menu or secondary in node. secondary should be supplementary messages sent by bot'''
-    if hasattr(active_node, "menu_message") and active_node.menu_message is not None:
+    if settings is None:
+        settings = ["menu", "secondary"]
+    if (settings == "menu" or "menu" in settings) and hasattr(active_node, "menu_message") and active_node.menu_message is not None:
         await active_node.menu_message.message.delete()
         active_node.menu_message.deleted = True
         if active_node.menu_message.view is not None: 
@@ -102,14 +123,14 @@ async def remove_message(active_node, event):
 
         active_node.menu_message = None
     
-    if hasattr(active_node, "secondary_messages") and active_node.secondary_messages is not None:
+    if (settings == "secondary" or "secondary" in settings) and hasattr(active_node, "secondary_messages") and active_node.secondary_messages is not None:
         for message_info in active_node.secondary_messages:
             await message_info.message.delete()
             message_info.deleted = True
             if message_info.view is not None: 
                 message_info.view.stop()
         active_node.secondary_messages.clear()
-cbUtils.set_callback_settings(remove_message, allowed=["callback"])
+cbUtils.set_callback_settings(remove_message, allowed=["callback"], has_parameter="optional")
 
 def button_is(active_node, event, custom_ids, goal_node=None):
     '''filter or transition function checks if button event is one of allowed ones passed in custom_ids'''
@@ -130,15 +151,21 @@ def is_session_user(active_node, event, goal_node=None):
     else:
         return active_node.session.data["user"].id == event.author.id
 
-@cbUtils.callback_settings(allowed=["transition_callback"])  
-def session_link_user(active_node, event, goal_node):
+@cbUtils.callback_settings(allowed=["transition_callback", "callback"])  
+def session_link_user(active_node, event, goal_node=None):
     '''transition callback function that records the user that triggered the interaction or message event as the owner of the session'''
-    if goal_node.session is None:
+    if goal_node is None:
+        session = active_node.session
+    else:
+        session = goal_node.session
+
+    if session is None:
         return
+    
     if isinstance(event, Interaction):
-        goal_node.session.data["user"] = event.user
+        session.data["user"] = event.user
     else: 
-        goal_node.session.data["user"] = event.author
+        session.data["user"] = event.author
 
 @cbUtils.callback_settings(has_parameter="optional", allowed=["filter"])  
 def is_reply(active_node, event, settings=None):
@@ -186,4 +213,4 @@ dialog_func_info = {send_message:{}, clear_buttons:{},
                     clicked_this_menu:{}, button_is:{}, remove_message:{}, 
                     is_session_user:{}, session_link_user:{},
                     is_reply:{}, selection_is:{}, edit_message:{},
-                    transfer_menu:{}, setup_DMM_node:{}}
+                    transfer_menu:{}, setup_DMM_node:{}, send_DM:{}}
