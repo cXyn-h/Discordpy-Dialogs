@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 
 class BaseGraphNode():
     VERSION = "3.5.0"
-    #TODO: maybe merge this with Schema? need some way to query for default values in schema
+
+    # this specifies what fields will be copied into graph node
     DEFINITION='''
 options:
   - name: id
@@ -235,11 +236,10 @@ class BaseNode():
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()
         
-    def added_to_handler(self, handler):
-        '''callback for when node is now being tracked by a handler that I don't want showing up in list of custom callbacks. if overriding
-        child class, be sure to call parent'''
+    def assign_to_handler(self, handler):
+        '''callback to assign handler instance to node so it can access general data. Called around time node will be added to handler 
+        event tracking, but not always after added. If overriding child class, be sure to call parent'''
         #one handler per node. 
-        #TODO: probably want to remove this in future.
         self.handler = handler
 
     def close_node(self):
