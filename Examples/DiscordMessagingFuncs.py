@@ -213,7 +213,7 @@ def setup_DMM_node(active_node, event):
 
 @cbUtils.callback_settings(allowed=["filter", "transition_filter"], has_parameter="Optional")
 def is_server_member(active_node, event, goal_node=None, server_id=None):
-    if (active_node.session is None or "server_id" not in active_node.session.data or active_node.session.data["sever_id"] is None) and server_id is None:
+    if (active_node.session is None or "server_id" not in active_node.session.data or active_node.session.data["server_id"] is None) and server_id is None:
         return False
     
     if server_id is None:

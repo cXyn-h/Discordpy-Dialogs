@@ -62,23 +62,4 @@ async def dropbox_send_message(active_node, event, settings):
     else:
         sent_message = await event.channel.send(**message_components)
 
-@cbUtils.callback_settings(allowed=["filter", "transition_filter"], has_parameter="Optional")
-def is_server_member(active_node, event, goal_node=None, server_id=None):
-    if (active_node.session is None or "server_id" not in active_node.session.data or active_node.session.data["sever_id"] is None) and server_id is None:
-        return False
-    
-    if server_id is None:
-        server_id = active_node.session.data["server_id"]
-    
-    bot = active_node.handler.bot
-    server = bot.get_guild(server_id)
-    if server is None:
-        return False
-    
-    if isinstance(event, Interaction):
-        user = event.user
-    else:
-        user = event.author
-    return server.get_member(user.id) is None
-
-dialog_func_info= {save_quiz_answer:{}, report_quiz_answers:{}, dropbox_save_message:{}, dropbox_send_message:{}, is_server_member:{}}
+dialog_func_info= {save_quiz_answer:{}, report_quiz_answers:{}, dropbox_save_message:{}, dropbox_send_message:{}}
