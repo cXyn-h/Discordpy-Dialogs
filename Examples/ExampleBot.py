@@ -30,8 +30,10 @@ class SimpleBot(Bot):
 
         
     async def on_interaction(self, interaction):
-        #TODO: fill in once I know what to do with it, does the existing error of separate views with buttons with the same names not really being able to deal still exist in latest version?
-        # print(f"bot on interaction entry point, interaction is <{interaction}>, type is <{interaction.type}> data is <{interaction.data}> ")
+        # NOTE: discord.py comes with views to handle interaction components on messages, but we're overriding those and handling it ourselves
+        #       because during designing there was a bug where different view objects with components with same name would get confused.
+        print(f"bot on interaction entry point, interaction is <{interaction}>, type is <{interaction.type}> data is <{interaction.data}> response done? <{interaction.response.is_done()}>")
+        
         if interaction.type == InteractionType.component:
             if interaction.data["component_type"] == discord.ComponentType.button.value:
                 await self.main_menu_handler.notify_event("button_click", interaction)

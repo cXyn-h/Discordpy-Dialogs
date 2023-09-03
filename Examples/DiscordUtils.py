@@ -36,6 +36,12 @@ def build_select_menu(component_settings):
         select_comp.add_option(**option_settings)
     return select_comp
 
+def build_embed(embed_settings):
+    #TODO: Build embed
+    embed = discord.Embed()
+    for field in embed_settings["fields"]:
+        embed.add_field(**field)
+    return embed
 
 def build_discord_message(message_settings, TTL, default_fills={}):
     ''' converts yaml settings to a dictionary for discord message constructor with all views and embeds etc components initialized'''
@@ -56,13 +62,12 @@ def build_discord_message(message_settings, TTL, default_fills={}):
         to_send_bits["content"] = message_settings["content"]
     
     if "embed" in message_settings and message_settings["embed"] is not None:
-        embed = discord.Embed()
-        for field in message_settings["embed"]["fields"]:
-            embed.add_field(**field)
+        to_send_bits["embed"] = build_embed(message_settings["embed"])
+
     return to_send_bits
 
 def build_discord_modal():
-    #TODO
+    #TODO build modal
     pass
 
 def record_sent_message(active_node, msg_info, is_menu=False):

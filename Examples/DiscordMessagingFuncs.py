@@ -1,6 +1,8 @@
 import discord
 from discord import ui, InteractionType, Interaction
+
 from datetime import datetime, timedelta
+
 import Examples.DiscordUtils as DiscordUtils
 import src.DialogNodes.BaseType as BaseType
 import src.utils.callbackUtils as cbUtils
@@ -8,7 +10,6 @@ import src.utils.callbackUtils as cbUtils
 async def edit_message(active_node, event, settings):
     '''callback function that edits the discord messsage for this node's menu message, or sends a new one if it doesn't exist. 
     Each node has one menu message that represents what message it is waiting for interactions or replies on'''
-    #TODO: extra tests
     # print(f"edit message function called, active node <{id(active_node)}><{active_node.graph_node.id}> event is <{event}>, parameters is <{settings}>")
     if not hasattr(active_node, "menu_message") or active_node.menu_message is None:
         # print(f"edit message callback found no menu message recorded for active node id'd <{id(active_node)}><{active_node.graph_node.id}>")
@@ -19,9 +20,10 @@ async def edit_message(active_node, event, settings):
     if isinstance(event, Interaction):
         if not event.response.is_done():
             # print(f"callback using interation event. response is not done")
+            # to make sure there's no interaction failed message, which would be confusing, filter it out and do response.
             await event.response.edit_message(**to_send_bits)
         else:
-            # print(f"callback using interation event. ERROR? response done already")
+            print(f"weird state. edit message called using interation event. response has been done already")
             await active_node.menu_message.message.edit(**to_send_bits)
     else:
         await active_node.menu_message.message.edit(**to_send_bits)
@@ -209,8 +211,27 @@ def setup_DMM_node(active_node, event):
     if not hasattr(active_node, "managed_replies"):
         active_node.managed_replies = set()
 
+@cbUtils.callback_settings(allowed=["filter", "transition_filter"], has_parameter="Optional")
+def is_server_member(active_node, event, goal_node=None, server_id=None):
+    if (active_node.session is None or "server_id" not in active_node.session.data or active_node.session.data["sever_id"] is None) and server_id is None:
+        return False
+    
+    if server_id is None:
+        server_id = active_node.session.data["server_id"]
+    
+    bot = active_node.handler.bot
+    server = bot.get_guild(server_id)
+    if server is None:
+        return False
+    
+    if isinstance(event, Interaction):
+        user = event.user
+    else:
+        user = event.author
+    return server.get_member(user.id) is None
+
 dialog_func_info = {send_message:{}, clear_buttons:{}, 
                     clicked_this_menu:{}, button_is:{}, remove_message:{}, 
                     is_session_user:{}, session_link_user:{},
                     is_reply:{}, selection_is:{}, edit_message:{},
-                    transfer_menu:{}, setup_DMM_node:{}, send_DM:{}}
+                    transfer_menu:{}, setup_DMM_node:{}, send_DM:{}, is_server_member:{}}

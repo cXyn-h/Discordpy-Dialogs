@@ -537,12 +537,12 @@ class DialogHandler():
     async def clear_session_history(self, session, timed_out=False):
         for node in session.get_linked_nodes():
             if node.is_active:
-                await self.close_node(node, timed_out)
+                await self.close_node(node, timed_out=timed_out)
         session.clear_session_history()
     
     async def close_session(self, session, timed_out=False):
         execution_reporting.debug(f"closing session <{id(session)}>, current nodes <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
-        await self.clear_session_history(session, timed_out)
+        await self.clear_session_history(session, timed_out=timed_out)
         del self.sessions[id(session)]
         pass
 
