@@ -13,8 +13,10 @@ EXCEPTION_LEVEL = {
 }
 
 POSSIBLE_PURPOSES = {
-    "filter": 1,
-    "callback": 2,
-    "transition_filter":3,
-    "transition_callback":4
+    "FILTER": 1,
+    "CALLBACK": 2,
+    "TRANSITION_FILTER":3,
+    "TRANSITION_CALLBACK":4,
+    "ACTION": 2,
+    "TRANSITION_ACTION": 4
 }

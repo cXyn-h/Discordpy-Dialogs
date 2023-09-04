@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 
 class BaseGraphNode():
-    VERSION = "3.5.0"
+    VERSION = "3.5.1"
 
     # this specifies what fields will be copied into graph node
     DEFINITION='''
