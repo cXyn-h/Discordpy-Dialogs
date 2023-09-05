@@ -18,6 +18,8 @@ import src.DialogEvents.BaseEvent as BaseEventType
 
 import src.BuiltinFuncs.BaseFuncs as BaseFuncs
 
+from src.utils.Enums import POSSIBLE_PURPOSES
+
 dialog_logger = logging.getLogger('Dev-Handler-Reporting')
 logHelper.use_default_setup(dialog_logger)
 dialog_logger.setLevel(logging.INFO)
@@ -188,7 +190,8 @@ class DialogHandler():
             execution_reporting.warn(f"cannot start at <{node_id}>, not valid node")
             return None
         graph_node = self.graph_nodes[node_id]
-        if graph_node.start is None:
+        # dialog_logger.debug(f"starting at, loaded graph node is <{vars(graph_node)}>")
+        if graph_node.graph_start is None:
             execution_reporting.warn(f"cannot start at <{node_id}>, node settings do not allow")
             return None
         
@@ -300,7 +303,7 @@ class DialogHandler():
                 # dialog_logger.debug(f"testing recursive helper, at filter {filter} in list {filter_list}")
                 if isinstance(filter, str):
                     # filter_run_result = run_filter(handler, filter, active_node, event, None)
-                    filter_run_result = self.run_func(filter, "filter", active_node, event)
+                    filter_run_result = self.run_func(filter, POSSIBLE_PURPOSES.FILTER, active_node, event)
                 else:
                     # is a dict representing function call with arguments or nested operator, should only have one key
                     key = list(filter.keys())[0]
@@ -310,7 +313,7 @@ class DialogHandler():
                     else:
                         # argument in vlaue is expected to be one object. a list, a dict, a string etc
                         # filter_run_result = run_filter(handler, key, active_node, event, value)
-                        filter_run_result = self.run_func(key, "filter", active_node, event, values=value)
+                        filter_run_result = self.run_func(key, POSSIBLE_PURPOSES.FILTER, active_node, event, values=value)
                 # early break because not possible to change result with rest of list
                 if operator == "and" and not filter_run_result:
                     return False
@@ -349,11 +352,11 @@ class DialogHandler():
         try:
             for callback in callbacks:
                 if isinstance(callback, str):
-                    await self.run_func_async(callback, "callback", active_node, event)
+                    await self.run_func_async(callback, POSSIBLE_PURPOSES.ACTION, active_node, event)
                 else:
                     key = list(callback.keys())[0]
                     value = callback[key]
-                    await self.run_func_async(key, "callback", active_node, event, values=value)
+                    await self.run_func_async(key, POSSIBLE_PURPOSES.ACTION, active_node, event, values=value)
         except Exception as e:
             execution_reporting.error(f"exception happened when trying to run callbacks on node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>. assuming skip")
             dialog_logger.error(f"exception happened when trying to run callbacks on node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, details {e}")
@@ -366,7 +369,7 @@ class DialogHandler():
             for filter in filter_list:
                 # dialog_logger.debug(f"testing recursive helper, at filter {filter} in list {filter_list}")
                 if isinstance(filter, str):
-                    filter_run_result = self.run_func(filter, "transition_filter", active_node, event, goal_node)
+                    filter_run_result = self.run_func(filter, POSSIBLE_PURPOSES.TRANSITION_FILTER, active_node, event, goal_node)
                 else:
                     # is a dict representing function call with arguments or nested operator, should only have one key
                     key = list(filter.keys())[0]
@@ -375,7 +378,7 @@ class DialogHandler():
                         filter_run_result = transition_filter_helper(handler, active_node, event, goal_node, value, operator=key)
                     else:
                         # argument in vlaue is expected to be one object. a list, a dict, a string etc
-                        filter_run_result = self.run_func(key, "transition_filter", active_node, event, goal_node, value)
+                        filter_run_result = self.run_func(key, POSSIBLE_PURPOSES.TRANSITION_FILTER, active_node, event, goal_node, value)
                 # early break because not possible to change result with rest of list
                 if operator == "and" and not filter_run_result:
                     return False
@@ -418,13 +421,13 @@ class DialogHandler():
                     try:
                         filter_res = transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
                         if isinstance(filter_res, bool) and filter_res:
-                            passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
+                            passed_transitions.append((node_name, transition["transition_actions"] if "transition_actions" in transition else [],
                                                         transition["session_chaining"] if "session_chaining" in transition else "end", close_flag))
                     except Exception as e:
                         execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>. assuming skip")
                         dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>, details {e}")
                 else:
-                    passed_transitions.append((node_name, transition["transition_callbacks"] if "transition_callbacks" in transition else [],
+                    passed_transitions.append((node_name, transition["transition_actions"] if "transition_actions" in transition else [],
                                                transition["session_chaining"] if "session_chaining" in transition else "end", close_flag))
 
         dialog_logger.debug(f"transitions that passed filters are for nodes <{[x[0] for x in passed_transitions]}>")
@@ -455,11 +458,11 @@ class DialogHandler():
                 
             for callback in passed_transition[1]:
                 if isinstance(callback, str):
-                    await self.run_func_async(callback, "transition_callback", active_node, event, next_node)
+                    await self.run_func_async(callback, POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node, event, next_node)
                 else:
                     key = list(callback.keys())[0]
                     value = callback[key]
-                    await self.run_func_async(key, "transition_callback", active_node, event, next_node, values=value)
+                    await self.run_func_async(key, POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node, event, next_node, values=value)
 
             # dialog_logger.info(f"checking session data, {session}")
 
@@ -483,13 +486,13 @@ class DialogHandler():
         #   or revisit whether or not I want this strictly called after officially being added and if that only happens after callbacks
         active_node.assign_to_handler(self)
 
-        for callback in active_node.graph_node.callbacks:
+        for callback in active_node.graph_node.actions:
             if isinstance(callback, str):
-                await self.run_func_async(callback, "callback", active_node, event)
+                await self.run_func_async(callback, POSSIBLE_PURPOSES.ACTION, active_node, event)
             else:
                 key = list(callback.keys())[0]
                 value = callback[key]
-                await self.run_func_async(key, "callback", active_node, event, values=value)
+                await self.run_func_async(key, POSSIBLE_PURPOSES.ACTION, active_node, event, values=value)
 
         for listed_event in active_node.graph_node.get_events().keys():
             if listed_event not in self.event_forwarding:
@@ -562,8 +565,9 @@ class DialogHandler():
         ---
         function passed in is being called for one of its intended purposes
         '''
+        # dialog_logger.debug(f"starting formatting parameters for function call. passed in: purpose <{purpose}>, a, e, g, v: <{id(active_node)}><{active_node.graph_node.id}>, <{event}>, <{goal_node}>, <{values}>")
         func_ref = self.functions[func_name]["ref"]
-        intended_purposes = [x in self.functions[func_name]["permitted_purposes"] for x in ["filter","callback","transition_filter","transition_callback"]]
+        intended_purposes = [x in self.functions[func_name]["permitted_purposes"] for x in [POSSIBLE_PURPOSES.FILTER,POSSIBLE_PURPOSES.ACTION,POSSIBLE_PURPOSES.TRANSITION_FILTER,POSSIBLE_PURPOSES.TRANSITION_ACTION]]
         cross_transtion = (intended_purposes[2] or intended_purposes[3]) and (intended_purposes[0] or intended_purposes[1])
 
         args_list = [active_node,event]
@@ -576,13 +580,13 @@ class DialogHandler():
             if values is None:
                 raise Exception(f"missing arguments to pass to function {func_name}")
             args_list.append(values)
-            if purpose in ["transition_filter", "transition_callback"]:
+            if purpose in [POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION]:
                 if goal_node is None:
                     raise Exception(f"trying to call {func_name} but is missing required goal node")
                 args_list.append(goal_node)
             return args_list
         
-        if purpose in ["transition_filter", "transition_callback"]:
+        if purpose in [POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION]:
             # function is getting called for handling transition
             if goal_node is None:
                 raise Exception(f"trying to call {func_name} for a transition but are missing goal node")
@@ -597,6 +601,7 @@ class DialogHandler():
                 execution_reporting.warning(f"calling {func_name}, have extra value for function parameters, discarding")
             else:
                 args_list.append(values)
+        # dialog_logger.debug(f"sorted args list is: <{args_list}>")
         return args_list
 
     #NOTE: keep this function in sync with synchronous version
@@ -609,9 +614,10 @@ class DialogHandler():
             else:
                 return None
         func_ref = self.functions[func_name]["ref"]
+        dialog_logger.debug(f"runn func async found function ref <{func_ref}>")
         if inspect.iscoroutinefunction(func_ref):
             return await self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
-        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose,active_node, event, goal_node, copy.deepcopy(values)))
+        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
     
 
     #NOTE: keep this function in sync with asynchronous version

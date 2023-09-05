@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import Examples.DiscordUtils as DiscordUtils
 import src.DialogNodes.BaseType as BaseType
 import src.utils.callbackUtils as cbUtils
+from src.utils.Enums import POSSIBLE_PURPOSES
 
 async def edit_message(active_node, event, settings):
     '''callback function that edits the discord messsage for this node's menu message, or sends a new one if it doesn't exist. 
@@ -31,7 +32,7 @@ async def edit_message(active_node, event, settings):
     if "view" in to_send_bits:
         active_node.menu_message.view.stop()
         active_node.menu_message.view = to_send_bits["view"]
-cbUtils.set_callback_settings(edit_message, has_parameter="always", allowed=["callback"])
+cbUtils.set_callback_settings(edit_message, has_parameter="always", allowed=[POSSIBLE_PURPOSES.ACTION])
 
 async def send_DM(active_node, event, settings):
     if isinstance(event, Interaction):
@@ -47,7 +48,7 @@ async def send_DM(active_node, event, settings):
         settings["redirect"] = {}
     settings["redirect"]["dest_channel_id"] = dm_channel.id
     await send_message(active_node, event, settings)
-cbUtils.set_callback_settings(send_DM, has_parameter="always", allowed=["callback"])
+cbUtils.set_callback_settings(send_DM, has_parameter="always", allowed=[POSSIBLE_PURPOSES.ACTION])
 
 async def send_message(active_node, event, settings):
     '''callback function that sends a discord message with provided settings, can handle redirecting to another channel.'''
@@ -87,7 +88,7 @@ async def send_message(active_node, event, settings):
 
     sent_msg_info = DiscordUtils.MessageInfo(sent_message, message_components["view"] if "view" in message_components else None)
     DiscordUtils.record_sent_message(active_node, sent_msg_info, "menu" in settings and settings["menu"] and "redirect" not in settings)
-cbUtils.set_callback_settings(send_message, has_parameter="always", allowed=["callback"])
+cbUtils.set_callback_settings(send_message, has_parameter="always", allowed=[POSSIBLE_PURPOSES.ACTION])
 
 async def clear_buttons(active_node, event, goal_node = None, close_messages=None):
     '''callback or transition callback function clears all interactable components from message and if there are suboptions for it, changes the Discord message's contents
@@ -104,14 +105,14 @@ async def clear_buttons(active_node, event, goal_node = None, close_messages=Non
         await active_node.menu_message.message.edit(content=close_messages["default"], view = None)
     else:
         await active_node.menu_message.message.edit(view = None)
-cbUtils.set_callback_settings(clear_buttons, has_parameter="optional", allowed=["callback", "transition_callback"])
+cbUtils.set_callback_settings(clear_buttons, has_parameter="optional", allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 
 def clicked_this_menu(active_node, event):
     '''filter function that checks if event (should be an interaction) interacted on this node's menu message'''
     if not hasattr(active_node, "menu_message") or active_node.menu_message is None:
         return False
     return event.message.id == active_node.menu_message.message.id
-cbUtils.set_callback_settings(clicked_this_menu, allowed=["filter"])
+cbUtils.set_callback_settings(clicked_this_menu, allowed=[POSSIBLE_PURPOSES.FILTER])
 
 async def remove_message(active_node, event, settings=None):
     '''callback function that deletes all discord messages recorded as menu or secondary in node. secondary should be supplementary messages sent by bot'''
@@ -132,7 +133,7 @@ async def remove_message(active_node, event, settings=None):
             if message_info.view is not None: 
                 message_info.view.stop()
         active_node.secondary_messages.clear()
-cbUtils.set_callback_settings(remove_message, allowed=["callback"], has_parameter="optional")
+cbUtils.set_callback_settings(remove_message, allowed=[POSSIBLE_PURPOSES.ACTION], has_parameter="optional")
 
 def button_is(active_node, event, custom_ids, goal_node=None):
     '''filter or transition function checks if button event is one of allowed ones passed in custom_ids'''
@@ -140,9 +141,9 @@ def button_is(active_node, event, custom_ids, goal_node=None):
         return event.data["custom_id"] == custom_ids
     else:
         return event.data["custom_id"] in custom_ids
-cbUtils.set_callback_settings(button_is, has_parameter="always", allowed=["transition_filter", "filter"])
+cbUtils.set_callback_settings(button_is, has_parameter="always", allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.FILTER])
 
-@cbUtils.callback_settings(allowed=["transition_filter", "filter"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.FILTER])
 def is_session_user(active_node, event, goal_node=None):
     '''filter or transition filter function that checks if the user for the interaction or message event is the same one as what is recorded in the 
     ndoe's session.'''
@@ -153,7 +154,7 @@ def is_session_user(active_node, event, goal_node=None):
     else:
         return active_node.session.data["user"].id == event.author.id
 
-@cbUtils.callback_settings(allowed=["transition_callback", "callback"])  
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_ACTION, POSSIBLE_PURPOSES.ACTION])  
 def session_link_user(active_node, event, goal_node=None):
     '''transition callback function that records the user that triggered the interaction or message event as the owner of the session'''
     if goal_node is None:
@@ -169,7 +170,7 @@ def session_link_user(active_node, event, goal_node=None):
     else: 
         session.data["user"] = event.author
 
-@cbUtils.callback_settings(has_parameter="optional", allowed=["filter"])  
+@cbUtils.callback_settings(has_parameter="optional", allowed=[POSSIBLE_PURPOSES.FILTER])  
 def is_reply(active_node, event, settings=None):
     '''filter function that checks if message event is replying to menu message, with settings to check if it is a reply to secondary or reply messages'''
     secondary_categories = settings["categories"] if settings is not None else []
@@ -183,7 +184,7 @@ def is_reply(active_node, event, settings=None):
         return event.reference is not None and event.reference.message_id in [msg_info.message.id for msg_info in active_node.managed_replies]
     return False
 
-@cbUtils.callback_settings(has_parameter="always", allowed=["filter", "transition_filter"])  
+@cbUtils.callback_settings(has_parameter="always", allowed=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])  
 def selection_is(active_node, event, settings, goal_node=None):
     '''filter or transition filter function that checks if the selection menu interaction is choosing a specific value'''
     # print(event.data)
@@ -193,14 +194,15 @@ def selection_is(active_node, event, settings, goal_node=None):
         return False
     return len(event.data["values"]) == 1 and event.data["values"][0] == settings["selection"]
 
-@cbUtils.callback_settings(allowed=["transition_callback"])  
-def transfer_menu(active_node, event, next_node):
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_ACTION])  
+def transfer_menu(active_node, event, goal_node):
     '''transition callback function that moves the menu message from this node to the next node so the next node can edit the message instead of 
     sending a new one'''
-    DiscordUtils.record_sent_message(next_node, active_node.menu_message, is_menu=True)
+    DiscordUtils.record_sent_message(goal_node, active_node.menu_message, is_menu=True)
     active_node.menu_message = None
+    print(f"transferred menu from <{id(active_node)}><{active_node.graph_node.id}> to <{id(goal_node)}><{goal_node.graph_node.id}>")
 
-@cbUtils.callback_settings(allowed=["callback"])  
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])  
 def setup_DMM_node(active_node, event):
     '''double checks node is setup for discord message menu functionality (aka the operations in this file)
     if something like this is needed, really a new node type should be defined.'''
@@ -211,7 +213,7 @@ def setup_DMM_node(active_node, event):
     if not hasattr(active_node, "managed_replies"):
         active_node.managed_replies = set()
 
-@cbUtils.callback_settings(allowed=["filter", "transition_filter"], has_parameter="Optional")
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], has_parameter="Optional")
 def is_server_member(active_node, event, goal_node=None, server_id=None):
     if (active_node.session is None or "server_id" not in active_node.session.data or active_node.session.data["server_id"] is None) and server_id is None:
         return False

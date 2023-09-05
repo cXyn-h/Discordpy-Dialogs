@@ -1,52 +1,53 @@
 import src.utils.callbackUtils as cbUtils
+from src.utils.Enums import POSSIBLE_PURPOSES
 
-@cbUtils.callback_settings(allowed=["callback", "filter"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER])
 def f1(a, e):
     if a != "a" or e != "e":
         raise Exception(f"f1 Bad values")
 
-@cbUtils.callback_settings(allowed=["callback", "filter"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER])
 def f2(a, e, v=None):
     if a != "a" or e != "e":
         raise Exception(f"f2 Bad values")
     print(f"f2 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=["callback", "filter"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER])
 def f3(a, e, v):
     if a != "a" or e != "e" or v != "v":
         raise Exception(f"f3 Bad values")
     print(f"f3 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=["transition_filter", "transition_callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f4(a, e, g):
     if a != "a" or e != "e" or g != "g":
         raise Exception(f"f4 Bad values")
 
-@cbUtils.callback_settings(allowed=["transition_filter", "transition_callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f5(a, e, g, v=None):
     if a != "a" or e != "e" or g != "g":
         raise Exception(f"f5 Bad values")
     print(f"f5 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=["transition_filter", "transition_callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f6(a,e,g,v):
     if a != "a" or e != "e" or g != "g" or v != "v":
         raise Exception(f"f6 Bad values")
     print(f"f6 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=["callback", "filter", "transition_filter", "transition_callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f7(a, e, g=None):
     if a != "a" or e != "e":
         raise Exception(f"f7 Bad values")
     print(f"f7 received a next_node of {g}")
 
-@cbUtils.callback_settings(allowed=["callback", "filter", "transition_filter", "transition_callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f8(a, e, g=None, v=None):
     if a != "a" or e != "e":
         raise Exception(f"f1 Bad values")
     print(f"f2 received a next_node of {g} and a value of {v}")
 
-@cbUtils.callback_settings(allowed=["callback", "filter", "transition_filter", "transition_callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f9(a, e, v, g=None):
     if a != "a" or e != "e" or v != "v":
         raise Exception(f"f9 Bad values")
@@ -78,7 +79,7 @@ for func, overrides in dialog_func_info.items():
     h.register_function(func, overrides)
 #for verifying function arguments, currently just printing them out to manually make sure
 for target_func in [f1, f2, f3, f4, f5, f6, f7, f8, f9]:
-    for purpose in ["filter", "transition_filter"]:
+    for purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
         for parameter_set in [["a","e"], ["a","e","g"], ["a","e", None, "v"], ["a","e","g","v"]]:
             print(f"---targeting {target_func.__name__} purpose {purpose}, with {parameter_set}")
             try:

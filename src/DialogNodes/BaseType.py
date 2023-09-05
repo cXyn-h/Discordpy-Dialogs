@@ -3,21 +3,21 @@
 from datetime import datetime, timedelta
 
 class BaseGraphNode():
-    VERSION = "3.5.1"
+    VERSION = "3.6.0"
 
     # this specifies what fields will be copied into graph node
     DEFINITION='''
 options:
   - name: id
-  - name: start
+  - name: graph_start
     default: Null
   - name: TTL
     default: 180
-  - name: callbacks
+  - name: actions
     default: []
   - name: events
     default: {}
-  - name: close_callbacks
+  - name: close_actions
     default: []
 '''
     SCHEMA='''
@@ -31,11 +31,11 @@ properties:
         type: "string"
     type:
         type: "string"
-    callbacks:
+    actions:
         type: array
         items:
             type: ["string", "object"]
-    start:
+    graph_start:
         type: object
         patternProperties:
             ".+":
@@ -67,7 +67,7 @@ properties:
                             type: array
                             items:
                                 type: ["string", "object"]
-                        callbacks:
+                        actions:
                             type: array
                             items:
                                 type: ["string", "object"]
@@ -92,7 +92,7 @@ properties:
                                         type: array
                                         items:
                                             type: ["string", "object"]
-                                    transition_callbacks:
+                                    transition_actions:
                                         type: array
                                         items:
                                             type: ["string", "object"]
@@ -110,7 +110,7 @@ properties:
     TTL: 
         type: integer
         minimum: -1
-    close_callbacks:
+    close_actions:
         type: array
         items:
             type: ["string", "object"]
@@ -121,29 +121,29 @@ required: ["id"]
     @classmethod
     def verify_format_data(cls, data:dict):
         '''WIP. need some way to verify data is in right format. not sure which way yet'''
-        # for ind, callback in enumerate(data["callbacks"]):
+        # for ind, callback in enumerate(data["actions"]):
         #     if isinstance(callback, str):
-        #         data["callbacks"][ind] = {callback:None}
+        #         data["actions"][ind] = {POSSIBLE_PURPOSES.ACTION:None}
 
         # for event in data["events"].values():
         #     if "filters" in event:
         #         for ind, filter in enumerate(event["filters"]):
         #             if isinstance(filter, str):
-        #                 event["filters"][ind] = {filter:None}
-        #     if "callbacks" in event:
-        #         for ind, callback in enumerate(event["callbacks"]):
+        #                 event["filters"][ind] = {POSSIBLE_PURPOSES.FILTER:None}
+        #     if "actions" in event:
+        #         for ind, callback in enumerate(event["actions"]):
         #             if isinstance(callback, str):
-        #                 event["callbacks"][ind] = {callback:None}
+        #                 event["actions"][ind] = {POSSIBLE_PURPOSES.ACTION:None}
         #     if "transitions" in event:
         #         for transition in event["transitions"]:
         #             if "transition_filters" in transition:
         #                 for ind, transition_filter in enumerate(transition["transition_filters"]):
         #                     if isinstance(transition_filter, str):
-        #                         transition["transition_filters"][ind] = {transition_filter:None}
-        #             if "transition_callbacks" in transition:
-        #                 for ind, transition_filter in enumerate(transition["transition_callbacks"]):
+        #                         transition["transition_filters"][ind] = {POSSIBLE_PURPOSES.TRANSITION_FILTER:None}
+        #             if "transition_actions" in transition:
+        #                 for ind, transition_filter in enumerate(transition["transition_actions"]):
         #                     if isinstance(transition_filter, str):
-        #                         transition["transition_callbacks"][ind] = {transition_filter:None}
+        #                         transition["transition_actions"][ind] = {POSSIBLE_PURPOSES.TRANSITION_FILTER:None}
         pass
 
     def __init__(self, options:dict) -> None:
@@ -156,19 +156,19 @@ required: ["id"]
         return BaseNode(self, session, timeout_duration=timedelta(seconds=self.TTL))
     
     def get_start_filters(self, event_key):
-        if (self.start is not None) and (event_key in self.start) and (self.start[event_key] is not None) and ("filters" in self.start[event_key]):
-            return self.start[event_key]["filters"]
+        if (self.graph_start is not None) and (event_key in self.graph_start) and (self.graph_start[event_key] is not None) and ("filters" in self.graph_start[event_key]):
+            return self.graph_start[event_key]["filters"]
         else:
             return []
         
     def get_start_callbacks(self, event_key):
-        if (self.start is not None) and (event_key in self.start) and (self.start[event_key] is not None) and ("setup" in self.start[event_key]):
-            return self.start[event_key]["setup"]
+        if (self.graph_start is not None) and (event_key in self.graph_start) and (self.graph_start[event_key] is not None) and ("setup" in self.graph_start[event_key]):
+            return self.graph_start[event_key]["setup"]
         else:
             return []
         
     def start_with_session(self, event_key):
-        return (self.start is not None) and (event_key in self.start) and (self.start[event_key] is not None) and ("session_chaining" in self.start[event_key])
+        return (self.graph_start is not None) and (event_key in self.graph_start) and (self.graph_start[event_key] is not None) and ("session_chaining" in self.graph_start[event_key])
     
     def get_events(self):
         if self.events is None:
@@ -176,9 +176,9 @@ required: ["id"]
         return self.events
     
     def get_callbacks(self):
-        if self.callbacks is None:
+        if self.actions is None:
             return []
-        return self.callbacks
+        return self.actions
     
     def get_event_close_flags(self, event_key):
         if event_key in self.events and self.events[event_key] is not None and "schedule_close" in self.events[event_key]:
@@ -196,8 +196,8 @@ required: ["id"]
             return []
         
     def get_event_callbacks(self, event_key):
-        if event_key in self.events and self.events[event_key] is not None and "callbacks" in self.events[event_key]:
-            return self.events[event_key]["callbacks"]
+        if event_key in self.events and self.events[event_key] is not None and "actions" in self.events[event_key]:
+            return self.events[event_key]["actions"]
         else:
             return []
         
@@ -208,9 +208,9 @@ required: ["id"]
             return []
         
     def get_close_callbacks(self):
-        if self.close_callbacks is None:
+        if self.close_actions is None:
             return []
-        return self.close_callbacks
+        return self.close_actions
 
 
 class BaseNode():

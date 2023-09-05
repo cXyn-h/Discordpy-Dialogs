@@ -10,7 +10,7 @@ def callback_settings(documentation:dict=None, allowed:list=None, has_parameter:
     `documentation` - dict
         WIP, doesn't do anything yet. meant to be schema and documentation to verify that yaml files are correctly formatted
     `allowed` - list[str]
-        what section of callbacks that function is meant for. can be "filter", "callback", "transition_filter", or "transition_callback"
+        what section of callbacks that function is meant for. can be one of the four values for utils.POSSIBLE_PURPOSES enum: FILTER, ACTION, TRANSITION_FILTER, TRANSITION_ACTION
     `has_parameter` - "always", "optional" or None
         whether the function always needs, optionally takes, or never takes a parameter
     `cb_key` - str
@@ -29,7 +29,7 @@ def set_callback_settings(func, documentation:dict=None, allowed:list=None, has_
     `documentation` - dict
         WIP, doesn't do anything yet. meant to be schema and documentation to verify that yaml files are correctly formatted
     `allowed` - list[str]
-        what section of callbacks that function is meant for. can be "filter", "callback", "transition_filter", or "transition_callback"
+        what section of callbacks that function is meant for. can be one of the four values for utils.POSSIBLE_PURPOSES enum: FILTER, ACTION, TRANSITION_FILTER, TRANSITION_ACTION
     `has_parameter` - "always", "optional" or None
         whether the function always needs, optionally takes, or never takes a parameter
     `cb_key` - str

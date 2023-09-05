@@ -1,10 +1,10 @@
 nodes:
   - id: "nodeA"
     type: Base
-    version: "3.5.0"
-    callbacks:
+    version: "3.6.0"
+    actions:
       - test_optional_parameters
-    start:
+    graph_start:
       click:
     events:
       click:
@@ -16,12 +16,12 @@ nodes:
               val2: a
     TTL: 13
   - id: "nodeB"
-    version: "3.5.0"
-    start:
+    version: "3.6.0"
+    graph_start:
       click:
         filters:
           - testfilter_1
-    close_callbacks:
+    close_actions:
      - filter_exception
     events:
       click:
@@ -29,7 +29,7 @@ nodes:
           - or:
             - testfilter_1
             - check_from: dfshd
-        callbacks:
+        actions:
           - test_optional_parameters: asdf
         schedule_close: node
         transitions:
@@ -39,7 +39,7 @@ nodes:
               - ok_to_transition
               # - is_awardable
       message:
-        callbacks:
+        actions:
           - send_random_message:
               choices:
                 - content: dfjsidfjsd
@@ -50,12 +50,12 @@ nodes:
 ---
 nodes:
   - id: "nodeC"
-    v: "3.5.0"
+    v: "3.6.0"
     events:
       message:
 ---
 nodes:
   - id: "nodeD"
-    v: "3.5.0"
+    v: "3.6.0"
   - id: "nodeE"
-    v: "3.5.0"    
+    v: "3.6.0"    

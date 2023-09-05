@@ -1,3 +1,4 @@
+from enum import Enum
 NODE_STATUS= {
     "inactie" : 0,
     "active" : 1,
@@ -12,11 +13,8 @@ EXCEPTION_LEVEL = {
     "ignore": 2, # suppress everything
 }
 
-POSSIBLE_PURPOSES = {
-    "FILTER": 1,
-    "CALLBACK": 2,
-    "TRANSITION_FILTER":3,
-    "TRANSITION_CALLBACK":4,
-    "ACTION": 2,
-    "TRANSITION_ACTION": 4
-}
+class POSSIBLE_PURPOSES(Enum):
+    FILTER= "filter"
+    TRANSITION_FILTER="transition_filter"
+    ACTION= "action"
+    TRANSITION_ACTION= "transition_action"

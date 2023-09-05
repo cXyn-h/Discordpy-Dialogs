@@ -3,6 +3,7 @@ from discord import ui, InteractionType, Interaction
 import Examples.DiscordMessagingFuncs as DiscordFuncs
 import src.utils.callbackUtils as cbUtils
 import Examples.DiscordUtils as DiscordUtils
+from src.utils.Enums import POSSIBLE_PURPOSES
 
 # Yep these functions are less generalized, probably similar to what another developer would want to add if customizing
 
@@ -18,7 +19,7 @@ def save_quiz_answer(active_node, event, goal_node):
             goal_node.session.data["quiz"][active_node.graph_node.id] = event.data["custom_id"]
         elif event.data["component_type"] == discord.ComponentType.select.value:
             goal_node.session.data["quiz"][active_node.graph_node.id] = event.data["values"]
-cbUtils.set_callback_settings(save_quiz_answer, allowed=["transition_callback"])
+cbUtils.set_callback_settings(save_quiz_answer, allowed=[POSSIBLE_PURPOSES.TRANSITION_ACTION])
     
 
 async def report_quiz_answers(active_node, event):
@@ -29,14 +30,14 @@ async def report_quiz_answers(active_node, event):
         await active_node.message.edit(content = message_to_send)
     else:
         await DiscordFuncs.send_message(active_node, event, settings={"use_reply": True, "message":{"content":message_to_send}})
-cbUtils.set_callback_settings(report_quiz_answers, allowed=["callback"])
+cbUtils.set_callback_settings(report_quiz_answers, allowed=[POSSIBLE_PURPOSES.ACTION])
 
 
-@cbUtils.callback_settings(allowed=["callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])
 async def dropbox_save_message(active_node, event):
     active_node.dropbox_message = event
 
-@cbUtils.callback_settings(allowed=["callback"])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])
 async def dropbox_send_message(active_node, event, settings):
     bot = active_node.handler.bot
 
