@@ -1,24 +1,25 @@
 # for better logging
 import logging
-import sys # needed if custom handlers. currently setup a default set for this project in LoggingHelper
-import os
+# has setup for format that is pretty good looking 
 import src.utils.LoggingHelper as logHelper
-import src.utils.SessionData as SessionData
 # asyncs
 import asyncio
 # timed things like TTL
 from datetime import datetime, timedelta
 # for identifying if functions are coroutines for callbacks
 import inspect
+
 import copy
 
 import src.DialogNodeParsing as nodeParser
 
-import src.DialogEvents.BaseEvent as BaseEventType
-
 import src.BuiltinFuncs.BaseFuncs as BaseFuncs
-
+#annotating function purposes
 from src.utils.Enums import POSSIBLE_PURPOSES
+
+import src.utils.SessionData as SessionData
+#validating function data
+from jsonschema import validate, ValidationError
 
 dialog_logger = logging.getLogger('Dev-Handler-Reporting')
 logHelper.use_default_setup(dialog_logger)
@@ -36,7 +37,6 @@ execution_reporting.setLevel(logging.DEBUG)
 
 #TODO: yaml support for what events want to throw during transitions?
 #TODO: allow yaml names to have scope and qualified names stuff ie parse . in names
-#TODO: validation for functions parameters
 #TODO: exception handling, how to direct output
 #TODO: maybe fix cleaning so it doesn't stop if one node excepts? but what to do with that node that excepts when trying to stop and clear?
 #TODO: sessions making sure they work as intended
@@ -44,23 +44,27 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: create modal support
 #TODO: saving and loading active nodes
 #TODO: maybe transition callback functions have a transition info paramter?
-#TODO: add enforcement for annotations of callbacks so can throw error when they don't match rest of yaml
 #TODO: should runtime be able to affect the node settings like next node to go to, callback list etc
 #TODO: Templating yaml?
 #TODO: go through code fine sweep for anything that could be changing data meant to be read
+#TODO: during transition order is to section session which closes node which has only one set way to close every time then does transition callbacks.
+#       This causes a flickering of buttons on discord menu message. Can I get that to not happen somehow? Can i get more info to close node so it can pass it to callbacks about why it's called?
+#       tho at least close_node knowing why it was calle would be good for debugging
 
 #NOTE: each active node will get a reference to handler. Be careful what callbacks are added as they can mess around with handler itself
 
 class DialogHandler():
     def __init__(self, nodes=None, functions=None, settings = None, clean_freq_secs = 3, **kwargs) -> None:
         self.graph_nodes = nodes if nodes is not None else {}
-        self.functions=functions if functions is not None else {}
+        '''dict of nodes that represent graph this handler controls. other handlers linking to same list is ok and on dev to handle.'''
+        self.functions = functions if functions is not None else {}
+        '''dict of functions this handler is allowed to call. other handlers linking to same list is ok and on dev to handle.'''
 
         self.active_nodes={}
         self.event_forwarding={}
 
-        #TODO: not relly using the session dict
         self.sessions = {}
+        #TODO: not relly using the session finding dict
         self.session_finding = {}
 
         #TODO: still need to integrate and use these settings everywhere, especially the reading sections
@@ -112,10 +116,85 @@ class DialogHandler():
             execution_reporting.info(f"updated/created node {node.id}")
             self.graph_nodes[k] = node
 
-    def final_validate():
-        #TODO: future: function goes through all loaded dialog stuff to make sure it's valid. ie all items have required parems, 
-        #       parems are right format, references point to regestered commands and dialogs, etc
-        pass
+    def final_validate(self):
+        #TODO: maybe clean up and split so this can do minimal work on new nodes? or maybe just wait until someone adds all nodes?
+
+        def validate_function_list(func_list, node_id, purpose, string_rep, event_type=None):
+            for callback in func_list:
+                if type(callback) is str:
+                    func_name = callback
+                    args = None
+                else:
+                    func_name = list(callback.keys())[0]
+                    args = callback[func_name]
+                
+                #TODO: check event type and node type once that's implemented
+
+                if not self.function_is_permitted(func_name, purpose):
+                    raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep} but isn't allowed to run there")
+                # function has to exist at this point because the check checks for that
+                func_ref = self.functions[func_name]["ref"]
+                if func_ref.has_parameter == "always" and args is None:
+                    raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, missing required arguments")
+                elif func_ref.has_parameter is None and args is not None:
+                    raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, function not meant to take arguments, extra values passed")
+                
+                if args is not None:
+                    try:
+                        validate(args, func_ref.schema)
+                    except ValidationError as ve:
+                        path_elements = [str(x) for x in ve.absolute_path]
+                        path = string_rep
+                        if len(path_elements) > 0:
+                            path+="."+'.'.join(path_elements)
+                        except_message = f"Exception in verifying node {node_id}, "\
+                                        f"yaml definition provided for function {func_name} listed in section {string_rep} does not fit expected format "\
+                                        f"error message: {ve.message}"
+                        raise Exception(except_message)
+                    
+        def validate_node(graph_node):
+            #TODO: use generic getters and setters in future
+            unique_next_nodes = set()
+            if graph_node.graph_start is not None:
+                for event_type, settings in graph_node.graph_start.items():
+                    if settings is None:
+                        continue
+                    if "setup" in settings:
+                        validate_function_list(settings["setup"], graph_node.id, POSSIBLE_PURPOSES.ACTION, "graph start setup", event_type)
+                    if "filters" in settings:
+                        validate_function_list(settings["filters"], graph_node.id, POSSIBLE_PURPOSES.FILTER, "graph start filters", event_type)
+            validate_function_list(graph_node.actions, graph_node.id, POSSIBLE_PURPOSES.ACTION, "node enter actions")
+            for event_type, settings in graph_node.events.items():
+                if "filters" in settings:
+                    validate_function_list(settings["filters"], graph_node.id, POSSIBLE_PURPOSES.FILTER, f"node {event_type} event filters", event_type)
+                if "actions" in settings:
+                    validate_function_list(settings["actions"], graph_node.id, POSSIBLE_PURPOSES.ACTION, f"node {event_type} event actions", event_type)
+                if "transitions" in settings:
+                    for transition_num, transition_settings in enumerate(settings["transitions"]):
+                        if type(transition_settings["node_names"]) is str:
+                            unique_next_nodes.add(transition_settings["node_names"])
+                        else:
+                            for next_node in transition_settings["node_names"]:
+                                unique_next_nodes.add(next_node)
+                        if "transition_filters" in transition_settings:
+                            validate_function_list(transition_settings["transition_filters"], graph_node.id, POSSIBLE_PURPOSES.TRANSITION_FILTER, f"node {event_type} event  index {transition_num} transition filters", event_type)
+                        if "transition_actions" in transition_settings:
+                            validate_function_list(transition_settings["transition_actions"], graph_node.id, POSSIBLE_PURPOSES.TRANSITION_ACTION, f"node {event_type} event index {transition_num} transition actions", event_type)
+            return unique_next_nodes
+
+        explored=set()
+        dependent=set()
+        for node_id, graph_node in self.graph_nodes.items():
+            next_nodes = validate_node(graph_node)
+            explored.add(node_id)
+            if node_id in dependent:
+                dependent.remove(node_id)
+            for next_node in next_nodes:
+                if next_node not in explored:
+                    dependent.add(next_node)
+
+        if len(dependent) > 0:
+            raise Exception(f"handler {id(self)} tried to validate the graph it has, but left with hanging transitions. missing nodes: {dependent}")
 
     '''################################################################################################
     #
@@ -482,8 +561,6 @@ class DialogHandler():
         #TODO: fine tune id for active nodes
         dialog_logger.info(f"adding node <{id(active_node)}><{active_node.graph_node.id}> to internal tracking")
         self.active_nodes[id(active_node)] = active_node
-        #TODO: discord example depends on this function being called before callbacks are. either find another way to pass bot reference to callbacks
-        #   or revisit whether or not I want this strictly called after officially being added and if that only happens after callbacks
         active_node.assign_to_handler(self)
 
         for callback in active_node.graph_node.actions:

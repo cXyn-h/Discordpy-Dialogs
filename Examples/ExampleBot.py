@@ -19,6 +19,7 @@ class SimpleBot(Bot):
         self.main_menu_handler.setup_from_files(["Examples/WalkthroughMenu.yaml"])
         self.main_menu_handler.register_module(funcs)
         self.main_menu_handler.register_module(funFuncs)
+        self.main_menu_handler.final_validate()
         # can instantiate more handlers to manage separate areas
 
     async def on_ready(self):

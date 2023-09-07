@@ -1,5 +1,6 @@
 # Dialoguer (placeholder title)
 Currently on version 3.6.0, in alpha testing to discover use cases. !!!THIS IS YOUR WARNING THINGS ARE STILL A BIT ROUGH!!! Started and created as a system to manage interactive dialogs for a discord bot, but further designed to extend to situations where the system waits for a variety of events with possibly multiple entities traversing the same graph layout. Version 2.0 is pretty much deprecated<br/>
+Designed in collaboration with @e-a-h
 
 __What is this project?__ <br />
 This project is a combination of the ideas that are in state machines, event graphs, and servers. Nodes that make up a graph describe what events are being waited for, what to do when event happens, and what node(s) you can transition to after an event. Since this is an interactive dialog handler, there can be multiple concurrent users and events from interactions can have instance specific data while the graph stays the same. A central object termed a handler pairs with a graph to handle taking events from multiple concurrent users and track where they are and their session's data for the graph being handled.<br/>

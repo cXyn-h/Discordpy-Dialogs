@@ -37,7 +37,9 @@ cbUtils.set_callback_settings(report_quiz_answers, allowed=[POSSIBLE_PURPOSES.AC
 async def dropbox_save_message(active_node, event):
     active_node.dropbox_message = event
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION], has_parameter="always", schema={"type":"object","properties":{"redirect":{"type":"object",
+        "properties":{"dest_channel_id":{"type":["string","integer"]}}, "required":["dest_channel_id"]}, "use_reply":{"type":"string",
+        "enum":["ping","no_ping"]}},"required":["redirect"] })
 async def dropbox_send_message(active_node, event, settings):
     bot = active_node.handler.bot
 
@@ -56,7 +58,7 @@ async def dropbox_send_message(active_node, event, settings):
     copy_message["embeds"] = embeds_list
     await channel.send(**copy_message)
 
-    message_components = DiscordUtils.build_discord_message(settings["redirect"]["message"], active_node.graph_node.TTL)
+    message_components = DiscordUtils.build_discord_message(settings["redirect"]["redirect_notif"], active_node.graph_node.TTL)
     if "use_reply" in settings:
         print(f"using reply, will it ping? {True if settings['use_reply'] == 'ping' else False}")
         sent_message = await event.reply(**message_components, allowed_mentions=discord.AllowedMentions(replied_user=True if settings["use_reply"] == "ping" else False))
