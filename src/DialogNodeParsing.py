@@ -18,9 +18,11 @@ parsing_logger.setLevel(logging.INFO)
 
 #TODO: this allows globally, any instances of needing to limit to subsets? -ie would this need to be in a class
 ALLOWED_NODE_TYPES = {}
-'''list of node types allowed to be used in graph'''
+'''list of node types that the parser can handle'''
 NODE_DEFINITION_CACHE = {}
+'''temp store of parsed definition for node types, type must appear in ALOWED_NODE_TYPES, read in as string, cached as dict'''
 NODE_SCHEMA_CACHE = {}
+'''temp store of parsed schema for node types, type must appear in ALLOWED_NODE_TYPES, read in as string, cached as dict'''
 #~~~~~~~~~ FURTHER SETUP OF THESE ARE DONE AFTER DEFINING FUNCTIONS FOR HANDLING AND REGESTERING ~~~~~~~~~
 
 def register_node_type(type_module, type_name, re_register = False):
@@ -248,7 +250,6 @@ def parse_node(yaml_node, location_printout=""):
         else:
             graph_node_model[option["name"]] = copy.deepcopy(yaml_node[option["name"]])
     # in case there's extra steps from node to verify or format data passed in, moved into constructor
-    # getattr(ALLOWED_NODE_TYPES[node_type],node_type+"GraphNode").verify_format_data(graph_node_model)
 
     graph_node=getattr(ALLOWED_NODE_TYPES[node_type],node_type+"GraphNode")(graph_node_model)
     parsing_logger.debug(f"parsed node is <{graph_node.id}>")

@@ -1,6 +1,9 @@
 #TODO: is adding values onto fields such as event filters feasible?
 #TODO: proofing against None values: what is values if you just list events flag and leave value blank, getters proofed against None, handler accesses these directly without getters so which ones might crash because of None
 from datetime import datetime, timedelta
+import typing
+import src.utils.SessionData as SessionData
+from src.utils.Enums import POSSIBLE_PURPOSES
 
 class BaseGraphNode():
     VERSION = "3.6.0"
@@ -118,57 +121,64 @@ required: ["id"]
     '''
     TYPE="Base"
 
-    @classmethod
-    def verify_format_data(cls, data:dict):
-        '''WIP. need some way to verify data is in right format. not sure which way yet'''
-        # for ind, callback in enumerate(data["actions"]):
-        #     if isinstance(callback, str):
-        #         data["actions"][ind] = {POSSIBLE_PURPOSES.ACTION:None}
-
-        # for event in data["events"].values():
-        #     if "filters" in event:
-        #         for ind, filter in enumerate(event["filters"]):
-        #             if isinstance(filter, str):
-        #                 event["filters"][ind] = {POSSIBLE_PURPOSES.FILTER:None}
-        #     if "actions" in event:
-        #         for ind, callback in enumerate(event["actions"]):
-        #             if isinstance(callback, str):
-        #                 event["actions"][ind] = {POSSIBLE_PURPOSES.ACTION:None}
-        #     if "transitions" in event:
-        #         for transition in event["transitions"]:
-        #             if "transition_filters" in transition:
-        #                 for ind, transition_filter in enumerate(transition["transition_filters"]):
-        #                     if isinstance(transition_filter, str):
-        #                         transition["transition_filters"][ind] = {POSSIBLE_PURPOSES.TRANSITION_FILTER:None}
-        #             if "transition_actions" in transition:
-        #                 for ind, transition_filter in enumerate(transition["transition_actions"]):
-        #                     if isinstance(transition_filter, str):
-        #                         transition["transition_actions"][ind] = {POSSIBLE_PURPOSES.TRANSITION_FILTER:None}
-        pass
+    def validate_node(self):
+        unique_next_nodes = set()
+        function_set_list = []
+        if self.graph_start is not None:
+            for event_type, settings in self.graph_start.items():
+                if settings is None:
+                    continue
+                if "setup" in settings:
+                    function_set_list.append((settings["setup"], self.id, POSSIBLE_PURPOSES.ACTION, "graph start setup", event_type))
+                if "filters" in settings:
+                    function_set_list.append((settings["filters"], self.id, POSSIBLE_PURPOSES.FILTER, "graph start filters", event_type))
+        function_set_list.append((self.actions, self.id, POSSIBLE_PURPOSES.ACTION, "node enter actions"))
+        for event_type, settings in self.events.items():
+            if "filters" in settings:
+                function_set_list.append((settings["filters"], self.id, POSSIBLE_PURPOSES.FILTER, f"node {event_type} event filters", event_type))
+            if "actions" in settings:
+                function_set_list.append((settings["actions"], self.id, POSSIBLE_PURPOSES.ACTION, f"node {event_type} event actions", event_type))
+            if "transitions" in settings:
+                for transition_num, transition_settings in enumerate(settings["transitions"]):
+                    if type(transition_settings["node_names"]) is str:
+                        unique_next_nodes.add(transition_settings["node_names"])
+                    else:
+                        for next_node in transition_settings["node_names"]:
+                            unique_next_nodes.add(next_node)
+                    if "transition_filters" in transition_settings:
+                        function_set_list.append((transition_settings["transition_filters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_FILTER, f"node {event_type} event  index {transition_num} transition filters", event_type))
+                    if "transition_actions" in transition_settings:
+                        function_set_list.append((transition_settings["transition_actions"], self.id, POSSIBLE_PURPOSES.TRANSITION_ACTION, f"node {event_type} event index {transition_num} transition actions", event_type))
+        return unique_next_nodes, function_set_list
 
     def __init__(self, options:dict) -> None:
-        self.__class__.verify_format_data(options)
         for key, option in options.items():
             setattr(self, key, option)
 
-    def activate_node(self, session=None):
+    def activate_node(self, session:typing.Union[None, SessionData.SessionData]=None) -> "BaseNode":
+        '''creates and sets up an active node based on this graph node'''
         # node_ttl = min (self.TTL) if session is None else (min(self.TTL, session.time_left().total_seconds()) if self.TTL > 0 else session.time_left().total_seconds())
         return BaseNode(self, session, timeout_duration=timedelta(seconds=self.TTL))
     
-    def get_start_filters(self, event_key):
-        if (self.graph_start is not None) and (event_key in self.graph_start) and (self.graph_start[event_key] is not None) and ("filters" in self.graph_start[event_key]):
+    def can_start(self, event_key:str):
+        if self.graph_start is None:
+            return False
+        return event_key in self.graph_start
+    
+    def get_start_filters(self, event_key:str):
+        if self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("filters" in self.graph_start[event_key]):
             return self.graph_start[event_key]["filters"]
         else:
             return []
         
-    def get_start_callbacks(self, event_key):
-        if (self.graph_start is not None) and (event_key in self.graph_start) and (self.graph_start[event_key] is not None) and ("setup" in self.graph_start[event_key]):
+    def get_start_callbacks(self, event_key:str):
+        if self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("setup" in self.graph_start[event_key]):
             return self.graph_start[event_key]["setup"]
         else:
             return []
         
-    def start_with_session(self, event_key):
-        return (self.graph_start is not None) and (event_key in self.graph_start) and (self.graph_start[event_key] is not None) and ("session_chaining" in self.graph_start[event_key])
+    def starts_with_session(self, event_key:str):
+        return self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("session_chaining" in self.graph_start[event_key])
     
     def get_events(self):
         if self.events is None:
@@ -180,9 +190,9 @@ required: ["id"]
             return []
         return self.actions
     
-    def get_event_close_flags(self, event_key):
-        if event_key in self.events and self.events[event_key] is not None and "schedule_close" in self.events[event_key]:
-            close_flag = self.events[event_key]["schedule_close"]
+    def get_event_close_flags(self, event_key:str):
+        if event_key in self.events.keys() and self.events[event_key] is not None and "schedule_close" in self.events[event_key]:
+            close_flag:typing.Union[str, list[str]] = self.events[event_key]["schedule_close"]
             if isinstance(close_flag, str):
                 return [close_flag]
             else:
@@ -214,7 +224,7 @@ required: ["id"]
 
 
 class BaseNode():
-    def __init__(self, graph_node, session=None, timeout_duration:timedelta=None) -> None:
+    def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
         self.graph_node = graph_node
         self.session = session
         self.is_active = True
@@ -238,7 +248,7 @@ class BaseNode():
         
     def assign_to_handler(self, handler):
         '''callback to assign handler instance to node so it can access general data. Called around time node will be added to handler 
-        event tracking, but not always after added. If overriding child class, be sure to call parent'''
+        event tracking, but not always after added. If overriding in child class, be sure to call parent'''
         #one handler per node. 
         self.handler = handler
 

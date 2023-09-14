@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta
+import typing
+import src.DialogNodes.BaseType as BaseType
 
 class SessionData:
     
     def __init__(self, timeout_duration=timedelta(minutes=10)) -> None:
-        self.linked_nodes = []
+        self.linked_nodes:list[BaseType.BaseNode] = []
         self.set_TTL(timeout_duration)
-        self.data = {}
+        # self.timeout:typing.Union[datetime, None] after above call
+        self.data:"dict[str, typing.Any]" = {}
 
     def set_TTL(self, timeout_duration=timedelta(minutes=10)):
         if timeout_duration.total_seconds() == -1:
