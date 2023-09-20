@@ -1,0 +1,21 @@
+nodes:
+  - id: One
+    TTL: 0
+    graph_start:
+      test:
+  - id: Two
+    graph_start:
+      test:
+    TTL: 5
+  - id: Three
+    graph_start:
+      test:
+    TTL: 10
+  - id: Four
+    graph_start:
+      test:
+    TTL: 15
+  - id: Five
+    graph_start:
+      test:
+    TTL: 20

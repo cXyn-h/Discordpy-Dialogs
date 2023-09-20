@@ -1,0 +1,33 @@
+nodes:
+  - id: One
+    graph_start:
+      test:
+    TTL: 0
+  - id: Two
+    graph_start:
+      test:
+    close_actions:
+      - sleep: 4
+    TTL: 0
+  - id: Three
+    graph_start:
+      test:
+    close_actions:
+      - sleep: 1
+    TTL: 0
+  - id: Four
+    graph_start:
+      test:
+    close_actions:
+      - sleep: 3
+    TTL: 0
+  - id: Five
+    graph_start:
+      test:
+    close_actions:
+      - sleep: 2
+    TTL: 3
+  - id: Six
+    graph_start:
+      test:
+    TTL: 6

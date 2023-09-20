@@ -1,0 +1,9 @@
+nodes:
+  - id: One
+    TTL: 0
+    graph_start:
+      test:
+  - id: Two
+    graph_start:
+      test:
+    TTL: 50
