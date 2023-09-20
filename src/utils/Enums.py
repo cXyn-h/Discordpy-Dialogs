@@ -18,3 +18,10 @@ class POSSIBLE_PURPOSES(Enum):
     TRANSITION_FILTER="transition_filter"
     ACTION= "action"
     TRANSITION_ACTION= "transition_action"
+
+class CLEANING_STATE(Enum):
+    STARTING=1
+    RUNNING=2
+    PAUSED=3
+    STOPPING=4
+    STOPPED=5

@@ -108,7 +108,6 @@ def validate_type(type_module, type_name):
     
 
     parsed_def = yaml.safe_load(graph_node.DEFINITION)
-    print("test",parsed_def)
     if not isinstance(parsed_def, dict) or "options" not in parsed_def:
         raise Exception(f"node type <{type_name}> cannot be used. definition must have options key")
     elif parsed_def["options"] is None:

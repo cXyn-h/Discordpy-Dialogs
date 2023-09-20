@@ -11,6 +11,10 @@ class SessionData:
         self.data:"dict[str, typing.Any]" = {}
 
     def set_TTL(self, timeout_duration=timedelta(minutes=10)):
+        if timeout_duration is None:
+            # should not really happen
+            timeout_duration = timedelta(self.graph_node.TTL)
+
         if timeout_duration.total_seconds() == -1:
             # specifically, don't time out
             self.timeout = None
@@ -35,3 +39,5 @@ class SessionData:
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()
 
+    def __del__(self):
+        print("destrucor for session data. id'd", id(self))
