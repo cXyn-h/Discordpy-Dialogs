@@ -96,3 +96,7 @@ def test_version_string():
         NodeParser.parse_version_string("4.6.5f")
     with pytest.raises(Exception):
         NodeParser.parse_version_string("4.6.5.3")
+    with pytest.raises(Exception):
+        NodeParser.parse_version_string("4.6")
+    with pytest.raises(Exception):
+        NodeParser.parse_version_string("6")

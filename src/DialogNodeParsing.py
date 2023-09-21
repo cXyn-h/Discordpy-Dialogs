@@ -42,6 +42,7 @@ def register_node_type(type_module, type_name, re_register = False):
     
     if graph_node_ref.TYPE in ALLOWED_NODE_TYPES and not re_register:
         parsing_logger.warning(f"type <{graph_node_ref.TYPE}> already registered, and not allowed to re-register. skipping")
+        return False
     else:
         ALLOWED_NODE_TYPES[graph_node_ref.TYPE] = type_module
         # if re-registering, probably a good idea to get rid of any potential stale data
@@ -50,6 +51,7 @@ def register_node_type(type_module, type_name, re_register = False):
         if re_register and graph_node_ref.TYPE in NODE_SCHEMA_CACHE:
             del NODE_SCHEMA_CACHE[graph_node_ref.TYPE]
         parsing_logger.debug(f"node type <{graph_node_ref.TYPE}> registerd, full list now is <{ALLOWED_NODE_TYPES}>")
+        return True
 
 def parse_version_string(version_string):
     '''takes version string and returns tuple of three numbers representing version number
