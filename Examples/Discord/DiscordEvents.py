@@ -1,3 +1,4 @@
+from typing import Any
 import src.DialogEvents.BaseEvent as BaseEvent
 import yaml
 
@@ -14,3 +15,7 @@ class MenuClickEvent(BaseEvent.BaseEvent):
 
     def get_event_filters(self):
         return yaml.safe_load(self.__class__.FILTERS)
+    
+    def __getattribute__(self, __name: str) -> Any:
+        #TODO: maybe this can work for Event class? Investigate
+        return self.interaction.__name

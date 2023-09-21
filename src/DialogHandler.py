@@ -828,7 +828,6 @@ class DialogHandler():
 
 
     def notify_soonest_cleaning(self, next_clean_time:datetime):
-        #TODO: might cause some weirdness
         if self.cleaning_status["state"] in [CLEANING_STATE.STOPPED, CLEANING_STATE.STOPPING] or next_clean_time is None:
             return
         if self.cleaning_status["next"] is None or next_clean_time < self.cleaning_status["next"]:

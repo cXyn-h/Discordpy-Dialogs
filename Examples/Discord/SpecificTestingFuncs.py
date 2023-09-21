@@ -1,8 +1,8 @@
 import discord
 from discord import ui, InteractionType, Interaction
-import Examples.DiscordMessagingFuncs as DiscordFuncs
+import Examples.Discord.DiscordMessagingFuncs as DiscordFuncs
 import src.utils.callbackUtils as cbUtils
-import Examples.DiscordUtils as DiscordUtils
+import Examples.Discord.DiscordUtils as DiscordUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 
 # Yep these functions are less generalized, probably similar to what another developer would want to add if customizing

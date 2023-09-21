@@ -3,7 +3,7 @@ from discord import ui, InteractionType, Interaction
 
 from datetime import datetime, timedelta
 
-import Examples.DiscordUtils as DiscordUtils
+import Examples.Discord.DiscordUtils as DiscordUtils
 import src.DialogNodes.BaseType as BaseType
 import src.utils.callbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES

@@ -121,7 +121,7 @@ only Functions you trust should be loaded into the handler since they can do any
 Node Life cycle 
 
 ## Setting up handlers
-There's already a written out example in `Examples/ExampleBot.py` for some of the details! 
+There's already a written out example in `Examples/Discord/ExampleBot.py` for some of the details! 
 
 One thing the example does not have is if you are using custom Node types, these need to be registered before loading yaml so the parser can recognize them. Registration only needs to be done once per type, but double calls won't crash and burn. The registration call can be placed globally or in a function. The syntax is `register_node_type(moduleName, type_name)`. Registered node types will technically avialable to all handlers created, and there currently are no capabilities to limit types a handler can get from parsing. 
 

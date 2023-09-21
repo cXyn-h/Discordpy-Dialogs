@@ -2,7 +2,7 @@ import json
 
 import discord
 from discord.ext import commands
-from Examples.ExampleBot import SimpleBot
+from Examples.Discord.ExampleBot import SimpleBot
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -19,7 +19,7 @@ async def menu(ctx):
 
 @bot.command()
 async def reload_menu(ctx):
-    bot.main_menu_handler.reload_files(["Examples/WalkthroughMenu.yaml"])
+    bot.main_menu_handler.reload_files(["Examples/Discord/WalkthroughMenu.yaml"])
     await ctx.channel.send("reloaded!")
 
 f = open("./config.json")

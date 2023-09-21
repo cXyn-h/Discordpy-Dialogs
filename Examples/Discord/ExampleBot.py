@@ -4,9 +4,9 @@ from discord.ext import commands
 from discord.ext.commands import Bot
 
 import src.DialogHandler as DialogHandler
-import Examples.DiscordMessagingFuncs as funcs
-import Examples.SpecificTestingFuncs as funFuncs
-import Examples.DiscordEvents as DiscordEvents
+import Examples.Discord.DiscordMessagingFuncs as funcs
+import Examples.Discord.SpecificTestingFuncs as funFuncs
+import Examples.Discord.DiscordEvents as DiscordEvents
 import logging
 
 logger = logging.getLogger('discord')
@@ -16,7 +16,7 @@ class SimpleBot(Bot):
         super().__init__(**kargs)
         self.loaded = False
         self.main_menu_handler = DialogHandler.DialogHandler(bot=self)
-        self.main_menu_handler.setup_from_files(["Examples/WalkthroughMenu.yaml"])
+        self.main_menu_handler.setup_from_files(["Examples/Discord/WalkthroughMenu.yaml"])
         self.main_menu_handler.register_module(funcs)
         self.main_menu_handler.register_module(funFuncs)
         self.main_menu_handler.final_validate()
