@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 import typing
 import src.utils.SessionData as SessionData
-from src.utils.Enums import POSSIBLE_PURPOSES
+from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
 class BaseGraphNode():
     VERSION = "3.6.0"
@@ -227,7 +227,7 @@ class BaseNode():
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
         self.graph_node = graph_node
         self.session = session
-        self.is_active = True
+        self.status = ITEM_STATUS.INACTIVE
         self.handler = None
 
         self.set_TTL(timeout_duration)
@@ -251,9 +251,19 @@ class BaseNode():
         event tracking, but not always after added. If overriding in child class, be sure to call parent'''
         #one handler per node. 
         self.handler = handler
+        self.activate()
 
-    def close_node(self):
+    def activate(self):
+        self.status = ITEM_STATUS.ACTIVE
+
+    def is_active(self):
+        return self.status == ITEM_STATUS.ACTIVE
+    
+    def notify_closing(self):
+        self.status = ITEM_STATUS.CLOSING
+
+    def close(self):
         '''callback for when node is about to close that I don't want showing up in list of custom callbacks. if overriding
         child class, be sure to call parent'''
-        self.is_active = False
+        self.status = ITEM_STATUS.CLOSED
         self.handler = None

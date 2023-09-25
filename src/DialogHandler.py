@@ -17,7 +17,7 @@ import src.DialogNodeParsing as nodeParser
 
 import src.BuiltinFuncs.BaseFuncs as BaseFuncs
 # annotating function purposes
-from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE
+from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE, ITEM_STATUS
 
 import src.utils.SessionData as SessionData
 # validating function data
@@ -325,7 +325,7 @@ class DialogHandler():
         close_flag = active_node.graph_node.get_event_close_flags(event_key)
         should_close_node = ("node" in close_flag) or transition_result["node"]
         should_close_session = ("session" in close_flag) or transition_result["session"]
-        if should_close_node and active_node.is_active:
+        if should_close_node and active_node.is_active():
             debugging_phase = "closing"
             await self.close_node(active_node, timed_out=False)
 
@@ -518,16 +518,29 @@ class DialogHandler():
 
 
     async def close_node(self, active_node:BaseType.BaseNode, timed_out=False, emergency_remove = False):
+        '''Goes through handler's process to close the given node. Calls the custom close callbacks if not emergency close mode, then removes node from
+        internal trackers
+        
+        Parameters
+        ---
+        active_node - `BaseNode`
+            the active node instance to close that is in this handler
+        timed_out - `bool`
+            whether or not the close call is because of timing out. this information gets passed to the callbacks
+        emergency_remove - `bool`
+            whether or not to skip the custom callbacks and go to removing node from tracking'''
+        if active_node.is_active():
+            active_node.notify_closing()
         execution_reporting.info(f"closing node <{id(active_node)}><{active_node.graph_node.id}> timed out? <{timed_out}>")
         if not emergency_remove:
             await self.run_event_callbacks_on_node(active_node, "close", {"timed_out":timed_out}, version="close")
 
-        active_node.close_node()
+        active_node.close()
         # this section closes the session if no other nodes in it are active. causing issues with sectioning session into steps (which clears recorded nodes when going to next step)
         # if active_node.session and active_node.session is not None:
         #     session_void = True
         #     for node in active_node.session.get_linked_nodes():
-        #         if node.is_active:
+        #         if node.is_active():
         #             session_void = False
         #             break
             
@@ -549,17 +562,21 @@ class DialogHandler():
         if session is None:
             dialog_logger.warning(f"somehow wanting to add none session, should not happen")
             return
+        session.activate()
         self.sessions[id(session)] = session
     
     async def clear_session_history(self, session:SessionData.SessionData, timed_out=False):
         for node in session.get_linked_nodes():
-            if node.is_active:
+            if node.is_active():
                 await self.close_node(node, timed_out=timed_out)
         session.clear_session_history()
     
     async def close_session(self, session:SessionData.SessionData, timed_out=False):
+        if session.is_active():
+            session.notify_closing()
         execution_reporting.debug(f"closing session <{id(session)}>, current nodes <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
         await self.clear_session_history(session, timed_out=timed_out)
+        session.close()
         del self.sessions[id(session)]
         pass
 
@@ -738,34 +755,6 @@ class DialogHandler():
                 cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> found next round is at {next_time}, {(next_time - starttime).total_seconds()} from now")
             
             try:
-                # some issues with making sure cleans are on time for nodes under situation that clean loop is taking too long
-                # Option 1: wrap clean call in wait_for with timeout.
-                #       Timout means the thing raises cancel and timeout errors on the task. seems like cancel is raised next time the task is executing
-                #       on event loop. Because calling close_node, and that calls helpers for custom callbacks that await on each one, cancel error
-                #       can happen in middle of that process. and maybe even middle of a single callback. think it's too much work to get 
-                #       good protection against in middle of calls. still some work to add tracking for which callbacks were called (esp how to deal
-                #       with event cbs since those can happen multiple times), may be helpful elsewere too though
-                # Option 2: add a check for time at end of each loop
-                #       ways to guard against task cancelling in middle of close
-                #       downside is now the loop is subject to how long the clean takes each time so more variable on when deletions happen
-                # maybe just avoid canceling cleaning task, since that seems to be a source of stopping in the middle of close callbacks? how it 
-                #   happens: cancel raised for cleaning task, cleaning can be in middle of close callback when receiving, but the callback list 
-                #   execution doesn't always happen in middle of task execution (aka cleaning) so (at least just currently) doesn't have any 
-                #   handlers for a *Task* cancellation error. error gets propagated back to clean which for option 2 catches it and stops propogation.
-                #   but damage already donen - the execution's been stopped somewhere. no trackers for which cb and where in middle of method
-    # [2023-09-18 23:07:16] [DEBUG   ] Dialog Cleaning: starting to clear out node 3076838752752 Two
-    # [2023-09-18 23:07:16] [INFO    ] Handler Reporting: closing node <3076838752752><Two> timed out? <True>
-    # [2023-09-18 23:07:16] [DEBUG   ] Dev-Handler-Reporting: starting running function named <sleep> for node <3076838752752><Two> section <POSSIBLE_PURPOSES.ACTION> 
-    # [2023-09-18 23:07:16] [DEBUG   ] Dev-Handler-Reporting: runn func async found function ref <<function sleep at 0x000002CC61E0EE50>>
-    # [2023-09-18 23:07:16] [DEBUG   ] test-clean: custom callback occurance tracker calling for first time on <3076838752752>
-    # [2023-09-18 23:07:16] [DEBUG   ] test-clean: sleep close callback called, node is 3076838752752 Two sleepign for 4
-    # [2023-09-18 23:07:17] [DEBUG   ] test-clean: cleaning test got to after sleep
-    # [2023-09-18 23:07:17] [DEBUG   ] test-clean: before sleep till next timeout
-    # [2023-09-18 23:07:19] [DEBUG   ] Dialog Cleaning: clean process caught cancel exception when trying to close node 3076838752752 Two
-    # [2023-09-18 23:07:19] [DEBUG   ] Dialog Cleaning: during cuaght cacnel exception handling, active nodes are ['3076838752752 Two', '3076838755200 Five', '3076838754528 Six']
-    # [2023-09-18 23:07:19] [WARNING ] Handler Reporting: cleaning close node finished awaiting closing 3076838752752, sanity check is it stil inside True
-    # [2023-09-18 23:07:19] [DEBUG   ] Dialog Cleaning: cleaning task 3076838044544 found clean is going long past next clean so starting clean before finishing.      
-    # [2023-09-18 23:07:19] [DEBUG   ] Dialog Cleaning: same position as above, current active nodes: ['3076838752752 Two', '3076838755200 Five', '3076838754528 Six'] 
                 cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> doing actual node pruning current state {self.cleaning_status}")
                 ## cleaning option 1 ~~~~~~~~~~v
                 # if this_cleaning == self.cleaning_task and next_time is not None:
@@ -802,11 +791,16 @@ class DialogHandler():
                     cleaning_logger.warning(f"cleaning task id <{id(this_cleaning)}> at failure changed state to stopped {self.cleaning_status}")
                 return
             
-
+            # the task executing at this point may be one in handler or old one that started but ran over time but stayed running to make sure
+            # nodes it found are cleaned
             if self.cleaning_status["state"] in [CLEANING_STATE.STOPPING, CLEANING_STATE.STOPPED]:
+                # if cleaning is trying to stop, don't really want to loop for another clean. doesn't matter which task. so go to wrap up section
                 break
             elif this_cleaning == self.cleaning_task:
+                # only want to consider looping on main task, other ones are are only meant to finish current clean to make sure nodes are cleaned up 
+                #       in case the task restarts can't get to them
                 if next_time is None:
+                    # cleans not needed currently so mark it differently from stopped to know its ok to auto start them up again
                     cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> found time for next clean is none, no further cleaning possible current state {self.cleaning_status}")
                     self.cleaning_status["state"] = CLEANING_STATE.PAUSED
                     self.cleaning_status["now"] = None
@@ -817,8 +811,10 @@ class DialogHandler():
                 cleaning_logger.debug(f"clean task id <{id(this_cleaning)}> last step of one round of cleaning, setting sleep time and waiting. status is {self.cleaning_status}, duration is {next_sleep_secs}")
                 await asyncio.sleep(next_sleep_secs)
             else:
+                # if not main task only wanted to finish clean, so go to wrap up section, technically could exit just here
                 break
 
+        #after loops wrap up section. updating status if supposed to
         cleaning_logger.debug(f"clean task id <{id(this_cleaning)}> finished loops current state {self.cleaning_status}")
         if this_cleaning == self.cleaning_task:
             self.cleaning_status["state"] = CLEANING_STATE.STOPPED
@@ -831,6 +827,7 @@ class DialogHandler():
         if self.cleaning_status["state"] in [CLEANING_STATE.STOPPED, CLEANING_STATE.STOPPING] or next_clean_time is None:
             return
         if self.cleaning_status["next"] is None or next_clean_time < self.cleaning_status["next"]:
+            dialog_logger.debug(f"handler notify soonest found the next clean time needed is sooner than next time the task has, starting new task")
             self.stop_cleaning()
             self.start_cleaning()
 
@@ -870,7 +867,8 @@ class DialogHandler():
         #TODO: more defenses and handling for exceptions
         for node in timed_out_nodes:
             try:
-                if id(node) in self.active_nodes:
+                # assuming if not active, some clean task busy cleaning. hopefully doesn't mess anything up
+                if id(node) in self.active_nodes and node.is_active():
                     cleaning_logger.debug(f"starting to clear out node {id(node)} {node.graph_node.id}")
                     await self.close_node(node, timed_out=True)
                     execution_reporting.warning(f"cleaning close node finished awaiting closing {id(node)}, sanity check is it stil inside {id(node) in self.active_nodes}")
@@ -889,7 +887,7 @@ class DialogHandler():
     
         for session in timed_out_sessions:
             try:
-                if id(session) in self.sessions:
+                if id(session) in self.sessions and session.is_active():
                     self.close_session(session, timed_out=True)
             except Exception as e:
                 execution_reporting.warning(f"close session failed on session {id(session)}, just going to ignore it for now")

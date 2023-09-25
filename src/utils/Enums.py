@@ -1,11 +1,9 @@
 from enum import Enum
-NODE_STATUS= {
-    "inactie" : 0,
-    "active" : 1,
-    "scheduled_close" : 2,
-    "closing" : 3,
-    "closed" : 4
-}
+class ITEM_STATUS(Enum):
+    INACTIVE = 0
+    ACTIVE = 1
+    CLOSING = 2
+    CLOSED = 3
 
 EXCEPTION_LEVEL = {
     "warnings": 0, # raise exception on warnings as well as exceptions

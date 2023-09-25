@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import typing
 import src.DialogNodes.BaseType as BaseType
+from src.utils.Enums import ITEM_STATUS
 
 class SessionData:
     
@@ -9,6 +10,7 @@ class SessionData:
         self.set_TTL(timeout_duration)
         # self.timeout:typing.Union[datetime, None] after above call
         self.data:"dict[str, typing.Any]" = {}
+        self.status = ITEM_STATUS.INACTIVE
 
     def set_TTL(self, timeout_duration=timedelta(minutes=10)):
         if timeout_duration is None:
@@ -38,6 +40,20 @@ class SessionData:
 
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()
+    
+    def activate(self):
+        self.status = ITEM_STATUS.ACTIVE
+
+    def is_active(self):
+        return self.status == ITEM_STATUS.ACTIVE
+        
+    def notify_closing(self):
+        self.status = ITEM_STATUS.CLOSING
+
+    def close(self):
+        '''callback for when node is about to close that I don't want showing up in list of custom callbacks. if overriding
+        child class, be sure to call parent'''
+        self.status = ITEM_STATUS.CLOSED
 
     def __del__(self):
         print("destrucor for session data. id'd", id(self))
