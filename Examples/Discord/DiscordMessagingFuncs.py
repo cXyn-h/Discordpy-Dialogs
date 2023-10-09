@@ -8,6 +8,10 @@ import src.DialogNodes.BaseType as BaseType
 import src.utils.callbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])
+def find_origin_server(active_node, event):
+    active_node.origin_server = event.guild
+
 async def edit_message(active_node, event, settings):
     '''callback function that edits the discord messsage for this node's menu message, or sends a new one if it doesn't exist. 
     Each node has one menu message that represents what message it is waiting for interactions or replies on'''
@@ -239,7 +243,7 @@ def is_server_member(active_node, event, goal_node=None, server_id=None):
         user = event.author
     return server.get_member(user.id) is None
 
-dialog_func_info = {send_message:{}, clear_buttons:{}, 
+dialog_func_info = {find_origin_server:{}, send_message:{}, clear_buttons:{}, 
                     clicked_this_menu:{}, button_is:{}, remove_message:{}, 
                     is_session_user:{}, session_link_user:{},
                     is_reply:{}, selection_is:{}, edit_message:{},

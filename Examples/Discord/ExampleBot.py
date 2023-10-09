@@ -1,11 +1,11 @@
 import discord
-from discord import InteractionType, Interaction
-from discord.ext import commands
+from discord import InteractionType
 from discord.ext.commands import Bot
 
 import src.DialogHandler as DialogHandler
-import Examples.Discord.DiscordMessagingFuncs as funcs
-import Examples.Discord.SpecificTestingFuncs as funFuncs
+# callbacks that provide extended functionality
+import Examples.Discord.DiscordMessagingFuncs as DiscordBaseFuncs
+import Examples.Discord.SpecificTestingFuncs as SpecializedFuncs
 import Examples.Discord.DiscordEvents as DiscordEvents
 import logging
 
@@ -17,8 +17,8 @@ class SimpleBot(Bot):
         self.loaded = False
         self.main_menu_handler = DialogHandler.DialogHandler(bot=self)
         self.main_menu_handler.setup_from_files(["Examples/Discord/WalkthroughMenu.yaml"])
-        self.main_menu_handler.register_module(funcs)
-        self.main_menu_handler.register_module(funFuncs)
+        self.main_menu_handler.register_module(DiscordBaseFuncs)
+        self.main_menu_handler.register_module(SpecializedFuncs)
         self.main_menu_handler.final_validate()
         # can instantiate more handlers to manage separate areas
 
