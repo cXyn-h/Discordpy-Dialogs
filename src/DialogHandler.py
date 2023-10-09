@@ -211,9 +211,12 @@ class DialogHandler():
         self.functions[cb_key]= {"ref":func, "permitted_purposes":permitted_purposes}
         return True
     
-    def register_module(self, module):
-        for func, overrides in module.dialog_func_info.items():
+    def register_functions(self, function_overrides):
+        for func, overrides in function_overrides.items():
             self.register_function(func, overrides)
+    
+    def register_module(self, module):
+        self.register_functions(module.dialog_func_info)
 
     def function_is_permitted(self, func_name:str, section:POSSIBLE_PURPOSES, escalate_errors=False):
         '''if function is registered in handler and is permitted to run in the given section of handling and transitioning
