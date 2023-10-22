@@ -84,6 +84,8 @@ class DialogHandler():
         self.register_module(BaseFuncs)
 
         for key, option in kwargs.items():
+            if hasattr(self, key):
+                raise Exception(f"trying to add extra attribute {key} but conflicts with existing attribute")
             setattr(self, key, option)
     
     '''################################################################################################
@@ -93,8 +95,8 @@ class DialogHandler():
     ################################################################################################'''
 
     def setup_from_files(self, file_names:"list[str]" = []):
-        '''override current graph with nodes in the passed in files. if you already read nodes from these files outside this class,
-        consider passing the list of nodes into the constructor.'''
+        '''override current graph with nodes in the passed in files. Raises error if nodes have double definitions in listed files
+          or graph node definition badly formatted.'''
         #TODO: second pass ok and debug running
         self.graph_nodes=nodeParser.parse_files(*file_names, existing_nodes={})
 
@@ -891,7 +893,7 @@ class DialogHandler():
         for session in timed_out_sessions:
             try:
                 if id(session) in self.sessions and session.is_active():
-                    self.close_session(session, timed_out=True)
+                    await self.close_session(session, timed_out=True)
             except Exception as e:
                 execution_reporting.warning(f"close session failed on session {id(session)}, just going to ignore it for now")
             ## cleaning option 2: ~~~~~~~~~v

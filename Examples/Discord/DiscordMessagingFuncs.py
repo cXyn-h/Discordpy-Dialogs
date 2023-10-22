@@ -8,9 +8,17 @@ import src.DialogNodes.BaseType as BaseType
 import src.utils.callbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])
-def find_origin_server(active_node, event):
-    active_node.origin_server = event.guild
+@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION], has_parameter="optional")
+def find_origin_server(active_node, event, save_location = "node"):
+    if type(save_location) is str:
+        save_location = [save_location]
+    
+    to_save = event.guild
+
+    if "node" in save_location:
+        active_node.origin_server = to_save
+    if "session" in save_location:
+        active_node.session.data["origin_server"] = to_save
 
 async def edit_message(active_node, event, settings):
     '''callback function that edits the discord messsage for this node's menu message, or sends a new one if it doesn't exist. 
@@ -57,7 +65,8 @@ async def send_DM(active_node, event, settings):
 cbUtils.set_callback_settings(send_DM, schema="FuncSchemas/sendMessageSchema.yml", has_parameter="always", allowed=[POSSIBLE_PURPOSES.ACTION])
 
 async def send_message(active_node, event, settings):
-    '''callback function that sends a discord message with provided settings, can handle redirecting to another channel.'''
+    '''callback function that sends a discord message with provided settings. Defaults sending message in same channel as event, but
+     if "redirect" settings are present, it sends the message to another channel.'''
     message_components = DiscordUtils.build_discord_message(settings["message"], active_node.graph_node.TTL)
     bot = active_node.handler.bot
 
