@@ -3,6 +3,7 @@ import copy
 from datetime import datetime, timedelta
 import asyncio
 import uuid
+from enum import Enum
 
 from src.utils.Enums import CLEANING_STATE
 # for better logging
@@ -25,14 +26,22 @@ if not cleaning_logger.hasHandlers():
     cleaning_logger.addHandler(logging_handler)
 cleaning_logger.setLevel(logging.INFO)
 
-from enum import Enum
 class COPY_RULES(Enum):
     ORIGINAL = 0
     SHALLOW = 1
     DEEP = 2
     ATTEMPT = 3
 
-from enum import Enum
+class UPDATE_STRAT(Enum):
+    SET = 0
+    ADD = 1  
+    DELETE = 2
+    # if want to add fields, cache update can insert
+    # nested lists want to add items to
+    # want to remove from list
+    # want to remove fields
+    # update is pretty good at setting lists or other fields
+
 class SLEEPER_STATE(Enum):
     STARTING=1
     CLEANING=2
@@ -66,7 +75,7 @@ class SLEEPER_STATE(Enum):
 #         self.status = CLEANING_STATE.STARTING
 #         self.next_run = datetime.utcnow()
 #         return True
-    
+
 #     def stop(self):
 #         if self.status in [CLEANING_STATE.STOPPING, CLEANING_STATE.STOPPED]:
 #             return False
@@ -74,7 +83,7 @@ class SLEEPER_STATE(Enum):
 #         # cleaning_logger.debug(f"result from canceling attempt, {res}")
 #         self.status = CLEANING_STATE.STOPPING
 #         return True
-    
+
 #     def clean_task(self):
 #         this_cleaning = asyncio.current_task()
 #         while self.status in [CLEANING_STATE.STARTING, CLEANING_STATE.RUNNING]:
@@ -83,7 +92,8 @@ class SLEEPER_STATE(Enum):
 
 
 class CacheEntry:
-    def __init__(self, data, timeout=180) -> None:
+    def __init__(self, primary_key, data, timeout=180) -> None:
+        self.primary_key = primary_key
         self.data = data
         self.set_TTL(timeout_duration=timedelta(seconds=timeout))
 
@@ -98,7 +108,7 @@ class Index:
     # purpose is to provide a lookup to objects in cache
     def __init__(self, name) -> None:
         self.name = name
-        self.pointers:dict[typing.Any, set] = {}
+        self.pointers:dict[typing.Hashable, set[typing.Hashable]] = {}
         self.cache = None
 
     def set_cache(self, cache:"Cache"):
@@ -113,33 +123,54 @@ class Index:
         '''creates and returns an interator through all primary keys of entries that fall under given key in this index'''
         return iter(self.pointers.get(key, set()))
 
+    def add_pointer(self, primary_key, secondary_key):
+        if isinstance(secondary_key, typing.Hashable):
+            if secondary_key not in self.pointers:
+                self.pointers[secondary_key] = set()
+            self.pointers[secondary_key].add(primary_key)
+
+    def del_pointer(self, primary_key, secondary_key):
+        if isinstance(secondary_key, typing.Hashable) and secondary_key in self.pointers:
+            self.pointers[secondary_key].remove(primary_key)
+            if len(self.pointers[secondary_key]) == 0:
+                del self.pointers[secondary_key]
+
     def get(self, key, default=None):
         '''
         returns the set of primary keys that fall under the given key in this index'''
         return self.pointers.get(key, default)
 
     def add_entry(self, primary_key, to_add_values):
-        '''index callback when entry is added to cache. Must implement in child classes. Meant for indices to sort out if entry
-        should be indexed and with what value'''
+        '''index callback when entry is added to cache, or setting up index. Must implement in child classes. Cache itself will only call this
+         when inserting a new key value pair. Meant for indices to sort out if entry should be indexed and with what value'''
         pass
 
-    def update_entry(self, primary_key, to_update_values):
-        '''index callback when an entry that exists in the cache is updated. Must implement in child classes. Meant for checking 
+    def update_entry(self, primary_key, to_update_values, already_updated=False, field_update_strat=UPDATE_STRAT.ADD):
+        '''index callback when an entry that exists in the cache is updated. Must implement in child classes. Meant for checking
         if the values that define this index were changed or not and assigning a different place'''
         pass
 
     def set_entry(self, primary_key, to_update_values):
-        '''index callback when an entry that exists in the cache has all its data set to new stuff. Meant for checking if 
-        the values that define this index were changed or not and assigning a different place'''
-        cache_entry = self.cache.get_key(primary_key, index_name="primary")[0]
-        cache_entry = self.cache.data[cache_entry]
-        self.del_entry(primary_key, cache_entry)
-        self.add_entry(primary_key, to_update_values)
+        '''index callback when an entry that exists in the cache has all its data set to new stuff. Must implement in child classes.
+        Meant for checking if the values that define this index were changed or not and assigning a different place'''
+        pass
 
     def del_entry(self, primary_key, cache_entry:CacheEntry):
         '''index callback when an entry is deleted from cache. Must implement in child classes. Mean for removing items from reference and
         cleaning up any now-hanging index structure'''
         pass
+
+    def emergency_cleanup(self, delete_pks = None):
+        '''clean up any dead references to any key in the passed in list'''
+        if delete_pks is None:
+            self.pointers.clear()
+            return
+        for pk in delete_pks:
+            for k, pk_list in list(self.pointers.items()):
+                if pk in pk_list:
+                    self.pointers[k].remove(pk)
+                if len(pk_list) == 0:
+                    del self.pointers[k]
 
     def __len__(self):
         return len(self.pointers)
@@ -150,13 +181,14 @@ class SimpleIndex(Index):
         self.col_name = col_name
 
     def add_entry(self, primary_key, to_add_values):
+        '''index callback when entry is added or changed'''
         if self.col_name in to_add_values:
             key_val = to_add_values[self.col_name]
             if key_val not in self.pointers:
                 self.pointers[key_val] = set()
             self.pointers[key_val].add(primary_key)
 
-    def update_entry(self, primary_key, to_update_values):
+    def update_entry(self, primary_key, to_update_values, already_updated=False, field_update_strat=UPDATE_STRAT.ADD):
         if self.col_name in to_update_values:
             # only need to update if keyed area could be updated
             # method is only meant to be called if key already exists so grabbing entry from cache shouldn't break
@@ -164,34 +196,76 @@ class SimpleIndex(Index):
             cache_entry = self.cache.data[cache_entry]
             cachev2_logger.debug(f"testing update entry, grabbing cache entry {cache_entry}")
             self.del_entry(primary_key, cache_entry)
-            self.add_entry(primary_key, to_update_values)
+            if field_update_strat == UPDATE_STRAT.SET or field_update_strat == UPDATE_STRAT.ADD:
+                self.add_entry(primary_key, to_update_values)
+
+    def set_entry(self, primary_key, to_update_values):
+        cache_entry = self.cache.data[self.cache.get_key(primary_key, index_name="primary")[0]]
+        self.del_entry(primary_key, cache_entry)
+        self.add_entry(primary_key, to_update_values)
 
     def del_entry(self, primary_key, cache_entry: CacheEntry):
         if self.col_name in cache_entry.data:
             key_val = cache_entry.data[self.col_name]
             if key_val in self.pointers:
                 self.pointers[key_val].remove(primary_key)
-            if len(self.pointers[key_val]) == 0:
-                del self.pointers[key_val]
+                if len(self.pointers[key_val]) == 0:
+                    del self.pointers[key_val]
 
 class CollectionIndex(SimpleIndex):
+    '''define this index on a col_name to auto idex anything updated or added to linked cache based on the value for col_name.
+    This one can work on hashable types, lists and sets filled with hashable types, and dictionaries. Indexes the container structures by indexing each item or first level key inside.
+    It technically can handle dictionaries nested in data, but it would be better to flatten the nesting.
+    
+    eg. if data has `col_name: list(1,2,3)` a get on index with key of 1 will return this entry.
+    if data has `col_name: {"extras":"extra data", "another_object":{...}}` then get on index can find this entry with keys of "extras" or "another_object"
+    
+    Can also handle a mix where sometimes the field in data can have primirtive times
+    and others is a list.
+    eg. entry one has `col_name: list(1,2,3)`, entry two has `col_name: 3` and both can be found with a get on this index with key 3
+    '''
     def __init__(self, name, col_name) -> None:
         super().__init__(name, col_name)
 
     def add_entry(self, primary_key, to_add_values):
         if self.col_name in to_add_values:
-            for key_val in to_add_values[self.col_name]:
-                if key_val not in self.pointers:
-                    self.pointers[key_val] = set()
-                self.pointers[key_val].add(primary_key)
+            if isinstance(to_add_values[self.col_name], typing.Hashable):
+                super().add_entry(primary_key=primary_key, to_add_values=to_add_values)
+            else:
+                for key_val in to_add_values[self.col_name]:
+                    self.add_pointer(primary_key, key_val)
+
+    def update_entry(self, primary_key, to_update_values, already_updated=False, field_update_strat=UPDATE_STRAT.ADD):
+        if self.col_name in to_update_values:
+            # only need to update if keyed area could be updated
+            # method is only meant to be called if key already exists so grabbing entry from cache shouldn't break
+            cache_entry = self.cache.get_key(primary_key, index_name="primary")[0]
+            cache_entry = self.cache.data[cache_entry]
+            cachev2_logger.debug(f"testing update entry, grabbing cache entry {cache_entry}")
+            if field_update_strat == UPDATE_STRAT.SET:
+                self.del_entry(primary_key, cache_entry)
+                self.add_entry(primary_key, to_update_values)
+            elif field_update_strat == UPDATE_STRAT.ADD:
+                self.add_entry(primary_key, to_update_values)
+            else:
+                # DELETE mode
+                if type(cache_entry.data[self.col_name]) is dict or type(cache_entry.data[self.col_name]) is list or type(cache_entry.data[self.col_name]) is set:
+                    if to_update_values[self.col_name] is not None:
+                        for key_val in to_update_values[self.col_name]:
+                            self.del_pointer(primary_key, key_val)
+                    else:
+                        for key_val in cache_entry.data[self.col_name]:
+                            self.del_pointer(primary_key, key_val)
+                else:
+                    self.del_pointer(primary_key, cache_entry.data[self.col_name])
 
     def del_entry(self, primary_key, cache_entry: CacheEntry):
         if self.col_name in cache_entry.data:
-            for key_val in cache_entry.data[self.col_name]:
-                if key_val in self.pointers:
-                    self.pointers[key_val].remove(primary_key)
-                if len(self.pointers[key_val]) == 0:
-                    del self.pointers[key_val]
+            if type(cache_entry.data[self.col_name]) is dict or type(cache_entry.data[self.col_name]) is list or type(cache_entry.data[self.col_name]) is set:
+                for key_val in cache_entry.data[self.col_name]:
+                    self.del_pointer(primary_key, key_val)
+            else:
+                super().del_entry(primary_key=primary_key, cache_entry=cache_entry)
 
 class Cache:
     '''
@@ -220,11 +294,16 @@ class Cache:
 
         self.cleaning_task = None
         self.cleaning_status = {"state":CLEANING_STATE.STOPPED, "next": None, "now": None}
+        self.add_indices(secondaryIndices)
 
+    def add_indices(self, secondaryIndices=[]):
         for index in secondaryIndices:
             if type(index) is str:
                 if index == "primary":
                     cachev2_logger.warning("trying to add index named 'primary' but that's a reserved name. skipping")
+                    continue
+                if index in self.secondary_indices:
+                    cachev2_logger.warning(f"trying to add index named {index} but that exists already. skipping")
                     continue
                 # assuming what's there is the name
                 self.secondary_indices[index] = SimpleIndex(index, index)
@@ -233,9 +312,11 @@ class Cache:
                 if index.name == "primary":
                     cachev2_logger.warning("trying to add index named 'primary' but that's a reserved name. skipping")
                     continue
+                if index.name in self.secondary_indices:
+                    cachev2_logger.warning(f"trying to add index named {index.name} but that exists already. skipping")
+                    continue
                 self.secondary_indices[index.name] = index
                 index.set_cache(self)
-
 
     def apply_copy_rule(self, cache_data, override_copy_rule=None):
         '''
@@ -270,10 +351,10 @@ class Cache:
         else:
             return cache_data
 
-    def get_key(self, key, index_name="primary", default=None, override_copy_rule=None) -> typing.Any:
+    def get_key(self, key, index_name="primary", default=None) -> typing.Any:
         '''same as the get method: returns a list of the entries in cache that fit the given key and index, but this returns the primary keys of these entries.
         Always returns found data as a list, if nothing found returns value passed in under default
-        
+
         Parameters
         ---
         * key - `Any`
@@ -282,13 +363,11 @@ class Cache:
             name of index to search for key in, defaults to "primary" index
         * default - `Any`
             The value to return if key is not found, default value is None
-        * override_copy_rule - `COPY_RULES`
-            The override for what type of copy or reference to get from cache for this run of get_key. Note with way indices are, likely to be
-            trying to copy index's data
         Returns
         ---
         If entries are found, returns a list of one or more primary keys. Copied using copy rules
         If no entries are found, returns the value of default'''
+        override_copy_rule=COPY_RULES.DEEP
         if index_name == "primary" or index_name == "":
             cachev2_logger.debug(f"getting data from primary index")
             if key in self.data:
@@ -310,7 +389,7 @@ class Cache:
     def get(self, key, index_name="primary", default=None, override_copy_rule=None) -> typing.Any:
         '''same as the get_key method: returns a list of the entries in cache that fit the given key and index, but this returns the entries' data itself.
         Always returns found data as a list, if nothing found returns value passed in under default
-        
+
         Parameters
         ---
         * key - `Any`
@@ -321,31 +400,19 @@ class Cache:
             The value to return if key is not found, default value is None
         * override_copy_rule - `COPY_RULES`
             The override for what type of copy or reference to get from cache for this run of get.
-        
+
         Return
         ---
-        If entries are found, returns a list of one or more dictionaries of data stored in cache. Copied using copy rules
+        If entries are found, returns the data of the entries in a list. Copied using copy rules
         If no entries are found, returns the value of default
         '''
         cachev2_logger.debug(f"reporting, cache get passed key of <{key}> index of <{index_name}> default value of <{default}>")
 
-        if index_name == "primary" or index_name == "":
-            cachev2_logger.debug(f"getting data from primary index")
-            if key in self.data:
-                # don't want to format default value into a list so there's a filter
-                # primary index assumed to have only one entry mapped, so format it as a list
-                return [self.apply_copy_rule(self.data[key].data, override_copy_rule=override_copy_rule)]
-            return default
-        elif index_name not in self.secondary_indices.keys():
-            cachev2_logger.debug(f"index <{index_name}> not found as a secondary index")
-            # no point trying, invalid index
+        result = self.get_key(key=key,index_name=index_name, default=default)
+        if result == default:
             return default
         else:
-            cachev2_logger.debug(f"getting data from index <{index_name}>")
-            primary_keys = self.secondary_indices[index_name].get(key, default)
-            if primary_keys == default:
-                return default
-            return [self.apply_copy_rule(self.data.get(primary_key).data, override_copy_rule=override_copy_rule) for primary_key in primary_keys]
+            return [self.apply_copy_rule(self.data.get(primary_key).data, override_copy_rule=override_copy_rule) for primary_key in result]
 
     def add(self, key=None, value=None, or_overwrite=False, addition_copy_rule=COPY_RULES.SHALLOW):
         ''' adds or overwrites cache entry at given primary key with given value
@@ -353,28 +420,24 @@ class Cache:
         Parameters
         ---
         * key - `Any`
-            the primary key to add the item under, defaults to uuid in hexdecimal
+            the primary key to add the item under, defaults to uuid version 4 in hexdecimal
         * value - `dict[Any, Any]`
             the data to store under this key, defaults to empty dictionary
         * or_overwrite - `bool`
             if overwritting existing data is ok, defaults to false
         * addition_copy_rule - `COPY_RULES`
             rule for how to copy incoming data before storing. defaults to shallow copy
-            
+
         Return
         ---
-        all things are stored as CacheEntry objects (there's some management data) with a data dictionary so return is a CacheEntry 
+        all things are stored as CacheEntry objects (there's some management data) with a data dictionary so return is a CacheEntry
         object that was just added or None if it couldn't add anything'''
         if key is None:
-            #note: generates in a way that may not be safe for multiprocessing. in case ever going beyond single thread asyncio to multithreaded
+            #note: not sure if this generates IDs in a way that is same for multithreading or multiprocessing. It should? Documentation doesn't say it isn't either
             key = uuid.uuid4().hex
         if value is None:
             value = {}
-        cachev2_logger.debug(f"adding data to cache, key: <{key}>, value <{value}>")
-        if key in self.data and not or_overwrite:
-            # if key is recorded and not allowed to overwrite, then can't do anything
-            return None
-        
+
         to_add = value
         if addition_copy_rule == COPY_RULES.SHALLOW:
             to_add = copy.copy(value)
@@ -386,16 +449,23 @@ class Cache:
             except Exception:
                 to_add = copy.copy(value)
 
-        # index_additions = {}
-        for index in self.secondary_indices.values():
-            index.add_entry(key, to_add)
-            # index_calc = index.add_entry(key, to_add)
-            # if index_calc is not None:
-            #     index_additions.update(index_calc)
-        
-        # to_add.update(index_additions)
+        cachev2_logger.debug(f"adding data to cache, key: <{key}>, value <{value}>")
+        if key in self.data:
+            if not or_overwrite:
+                # if key is recorded and not allowed to overwrite, then can't do anything
+                return None
+            # allowed to overwrite previous data, so technically a set rather than an add
+            return self.set(key=key, value=value, index_name='primary', addition_copy_rule=addition_copy_rule)
+        else:
+            # index_additions = {}
+            for index in self.secondary_indices.values():
+                index.add_entry(key, to_add)
+                # index_calc = index.add_entry(key, to_add)
+                # if index_calc is not None:
+                #     index_additions.update(index_calc)
+            # to_add.update(index_additions)
+            self.data[key] = CacheEntry(key, to_add, timeout=self.default_timeout)
 
-        self.data[key] = CacheEntry(to_add, timeout=self.default_timeout)
         return self.data[key]
 
     def add_all(self, entries:dict, or_overwrite=False, addition_copy_rule=COPY_RULES.SHALLOW):
@@ -416,9 +486,11 @@ class Cache:
             results[key] = result
         return results
 
-    def update(self, key, value, index_name="primary", addition_copy_rule=COPY_RULES.SHALLOW, or_create=True):
+    def update(self, key, value, index_name="primary", addition_copy_rule=COPY_RULES.SHALLOW, or_create=True, field_update_strat=UPDATE_STRAT.ADD):
         '''
-        updates stored data with given value dictionary for the entry at the given index and key. Uses the given copy rule for if copying of incoming value is needed
+        updates the stored data and indices at given index and key. Uses the given value dictionary and field_update_strat to know what fields and how to update. Field_update_strat is how to modify elements
+        of sets lists or first level of dictionaries. ie there's a list of string in data, can pass in two new values with update strat of ADD to add those two elements, SET to set to list with only those two items, 
+        DELETE to remove those two elements if they are in list. Uses the given copy rule for if copying of incoming value is needed
 
         Parameters
         ---
@@ -429,16 +501,136 @@ class Cache:
         * index_name - `str`
             name of index to search for key in, defaults to "primary" index
         * or_create - `bool`
-            if adding key is ok, defaults to True
+            if ok to create entry if not found. creates with given key if using primary index otherwise uses randomized uuid. defaults to True
         * addition_copy_rule - `COPY_RULES`
             rule for how to copy incoming data before storing. defaults to shallow copy
+        * field_update_strat - `UPDATE_STRAT`
+            rule for how to update nested structures with passed in data
 
         Return
         ---
-        If primary index was used and something was updated or added, the single up-to-date CacheEntry object.
+        If primary or nonexistant index was used and something was updated or added, the single up-to-date CacheEntry object.
         If a secondary index was used, a dictionary of primary keys that were
         updated or added to the up-to-date CacheEntry objects. None otherwise if nothing was updated
         '''
+        # for testing this setting
+        # field_update_strat=UPDATE_STRAT.SET
+        # recusrive function, only primary key option really adds data, if by secondary it calls again with primary key
+
+        if index_name == "primary" or index_name == "":
+            if key in self.data:
+                # key already saved in cache
+                if id(value) == id(self.data.get(key).data):
+                    # passed in values is same object as what is already stored for the key. techincally possible to dig and grab but also want to provide way to get it anyways
+                    # case with a couple implications:
+                    #   data could be directly touched and indices will not get automatically updated based off of changes thare aren't done through cache methods
+                    #   these changes already are in cache when cache update/set/delete functions are being called, while update index assumes it isn't
+                    if field_update_strat == UPDATE_STRAT.DELETE:
+                        self.data.get(key).data.clear()
+                    for index in self.secondary_indices.values():
+                        index.emergency_cleanup([key])
+                        cachev2_logger.debug(f"emergency cleaning out key {key} from index {index.name}")
+                        index.update_entry(key, value, already_updated=True, field_update_strat=field_update_strat)
+                    
+                    return self.data.get(key)
+                
+                # only do rest of function if update values passed in is not same object as actual storage
+                to_update = value
+                if addition_copy_rule == COPY_RULES.SHALLOW:
+                    to_update = copy.copy(value)
+                elif addition_copy_rule == COPY_RULES.DEEP:
+                    to_update = copy.deepcopy(value)
+                elif addition_copy_rule == COPY_RULES.ATTEMPT:
+                    try:
+                        to_update = copy.deepcopy(value)
+                    except Exception:
+                        to_update = copy.copy(value)
+
+                # now adding, tell about updates before updates in case index depends on current state
+                for index in self.secondary_indices.values():
+                    index.update_entry(key, to_update, field_update_strat=field_update_strat)
+
+                # actual update of data
+                if field_update_strat == UPDATE_STRAT.SET:
+                    self.data.get(key).data.update(to_update)
+                elif field_update_strat == UPDATE_STRAT.DELETE:
+                    # passed in values are fields to be deleted, or for lists, sets and dicts what sub items/keys to be deleted
+                    cache_entry = self.data.get(key)
+                    for update_key, update_data in to_update.items():
+                        if update_key in cache_entry.data:
+                            field_value = cache_entry.data.get(update_key)
+                            if type(field_value) is list:
+                                if update_data is None:
+                                    del cache_entry.data[update_key]
+                                    continue
+                                for secondary_key in update_data:
+                                    field_value.remove(secondary_key)
+                                continue
+                            elif type(field_value) is dict:
+                                if update_data is None:
+                                    del cache_entry.data[update_key]
+                                    continue
+                                for secondary_key in update_data:
+                                    del field_value[secondary_key]
+                                continue
+                            elif type(field_value) is set:
+                                if update_data is None:
+                                    del cache_entry.data[update_key]
+                                    continue
+                                for secondary_key in update_data:
+                                    field_value.remove(secondary_key)
+                                continue
+                            del cache_entry.data[update_key]
+                else:
+                    # add strat, means any new fields get added, if there's an existing collection, add items to it (only if possible), otherwise does set too
+                    for update_key, update_data in to_update.items():
+                        # to_update is dict of all things to update
+                        if update_key in self.data.get(key).data:
+                            if type(self.data.get(key).data[update_key]) is list:
+                                if type(update_data) is list or type(update_data) is set:
+                                    self.data.get(key).data[update_key].extend(update_data)
+                                continue
+                            elif type(self.data.get(key).data[update_key]) is dict:
+                                if type(update_data) is dict:
+                                    self.data.get(key).data[update_key].update(update_data)
+                                continue
+                            elif type(self.data.get(key).data[update_key]) is set:
+                                if type(update_data) is set or type(update_data) is list:
+                                    for update_data_entry in update_data:
+                                        self.data.get(key).data[update_key].add(update_data_entry)
+                                continue
+                        # either key isn't in data so can just set value, or key inside and isn't a nested collection so behaves like a set value
+                        self.data.get(key).data[update_key] = update_data
+                # timeout is based on last change
+                self.data.get(key).set_TTL(timedelta(seconds=self.default_timeout))
+                self.notify_soonest_cleaning(self.data.get(key).timeout)
+                return self.data.get(key)
+            else:
+                # primary key not found
+                if or_create:
+                    self.add(key, value, addition_copy_rule=addition_copy_rule)
+                    return self.data.get(key)
+                return None
+        elif index_name in self.secondary_indices.keys():
+            results = {}
+            primary_keys = self.get_key(key=key,index_name=index_name, default=set())
+            for pk in list(primary_keys):
+                # if no second process or async changes, then or_create can't affect anything while executing for loop. never hits that condition
+                update_res = self.update(pk, value, index_name="primary")
+                results[pk] = update_res
+            if len(primary_keys) == 0 and or_create:
+                # length of zero means nothing found, which is when or_create should be checked
+                entry = self.add(value=value, addition_copy_rule=addition_copy_rule)
+                results[entry.primary_key] = entry
+            return results
+        else:
+            # index does not exist
+            if or_create:
+                entry = self.add(value=value, addition_copy_rule=addition_copy_rule)
+                return entry
+            return None
+
+    def set(self, key, value, index_name="primary", addition_copy_rule = COPY_RULES.SHALLOW, or_create=True):
         if index_name == "primary" or index_name == "":
             if key in self.data:
                 to_update = value
@@ -451,9 +643,15 @@ class Cache:
                         to_update = copy.deepcopy(value)
                     except Exception:
                         to_update = copy.copy(value)
+                
+                if id(value) == id(self.data.get(key).data):
+                    # if update called and passed in original data, assuming likely modified data without going through cache commands
+                    # which will mean indices dont get updated so do reindex stuff
+                    for index in self.secondary_indices.values():
+                        index.emergency_cleanup([key])
                 for index in self.secondary_indices.values():
-                    index.update_entry(key, to_update)
-                self.data.get(key).data.update(to_update)
+                    index.set_entry(key, value)
+                self.data.get(key).data=to_update
                 self.data.get(key).set_TTL(timedelta(seconds=self.default_timeout))
                 self.notify_soonest_cleaning(self.data.get(key).timeout)
                 return self.data.get(key)
@@ -462,43 +660,22 @@ class Cache:
                     self.add(key, value, addition_copy_rule=addition_copy_rule)
                     return self.data.get(key)
                 return None
-        elif index_name not in self.secondary_indices.keys():
-            return None
-        else:
+        elif index_name in self.secondary_indices.keys():
             results = {}
-            primary_keys = self.secondary_indices[index_name].get(key, set())
+            primary_keys = self.get_key(key=key,index_name=index_name, default=set())
             for pk in list(primary_keys):
-                update_res = self.update(pk, value, index_name="primary")
-                if update_res is not None:
-                    results[pk] = update_res
+                update_res = self.set(pk, value, index_name="primary")
+                results[pk] = update_res
+            if len(primary_keys) == 0 and or_create:
+                # length of zero means nothing found
+                entry = self.add(value=value, addition_copy_rule=addition_copy_rule)
+                results[entry.primary_key] = entry
             return results
-
-    def set(self, key, value, index_name="primary", addition_copy_rule = COPY_RULES.SHALLOW):
-        if index_name == "primary" or index_name == "":
-            if key in self.data:
-                for index in self.secondary_indices.values():
-                    index.set_entry(key, value)
-                to_update = value
-                if addition_copy_rule == COPY_RULES.SHALLOW:
-                    to_update = copy.copy(value)
-                elif addition_copy_rule == COPY_RULES.DEEP:
-                    to_update = copy.deepcopy(value)
-                elif addition_copy_rule == COPY_RULES.ATTEMPT:
-                    try:
-                        to_update = copy.deepcopy(value)
-                    except Exception:
-                        to_update = copy.copy(value)
-                self.data.get(key).data=to_update
-                self.data.get(key).set_TTL(timedelta(seconds=self.default_timeout))
-                self.notify_soonest_cleaning(self.data.get(key).timeout)
-            else:
-                self.add(key, value, addition_copy_rule=addition_copy_rule)
-        elif index_name not in self.secondary_indices.keys():
-            pass
         else:
-            primary_keys = self.secondary_indices[index_name].get(key, set())
-            for pk in list(primary_keys):
-                self.set(pk, value, index_name="primary")
+            if or_create:
+                entry = self.add(value=value, addition_copy_rule=addition_copy_rule)
+                return entry
+            return None
 
     def delete(self, key, index_name="primary"):
         if index_name == "primary" or index_name == "":
@@ -508,11 +685,9 @@ class Cache:
                 for index in self.secondary_indices.values():
                     index.del_entry(key, value)
                 del self.data[key]
-        elif index_name not in self.secondary_indices.keys():
-            return
-        else:
+        elif index_name in self.secondary_indices.keys():
             # cachev2_logger.debug(f"deleting key <{key}> in index <{index_name}>")
-            primary_keys = self.secondary_indices[index_name].get(key, set())
+            primary_keys = self.get_key(key=key,index_name=index_name, default=set())
             for pk in list(primary_keys):
                 self.delete(pk, index_name="primary")
 
@@ -527,12 +702,12 @@ class Cache:
             if filter_pass:
                 result.append(self.apply_copy_rule(entry.data, override_copy_rule))
         return result
-                    
+
         #TODO: WIP, how to do ands and ors
 
     def reindex(self, updated_keys:'typing.Union[str, list[str], None]'=None):
         if updated_keys is None:
-            updated_keys = self.data.keys()
+            updated_keys = list(self.data.keys())
         if type(updated_keys) is not list:
             updated_keys = [updated_keys]
 
@@ -540,7 +715,8 @@ class Cache:
             if key not in self.data:
                 continue
             for index in self.secondary_indices.values():
-                index.update_entry(key, self.get(key=key, index_name="primary"))
+                index.emergency_cleanup([key])
+                index.update_entry(key, self.get(key=key, index_name="primary")[0])
 
     def clear(self):
         for pk in list(self.data.keys()):
@@ -570,7 +746,7 @@ class Cache:
 
     def keys(self):
         return self.data.keys()
-    
+
     def values(self):
         return self.data.values()
 
@@ -586,7 +762,7 @@ class Cache:
                 self.cleaning_status["state"] = CLEANING_STATE.RUNNING
                 cleaning_logger.debug(f"clean task id <{id(this_cleaning)}> inital startup changed state to running {self.cleaning_status}")
             starttime = datetime.utcnow()
-            
+
             cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> getting timed out items. current state {self.cleaning_status}")
             timed_out_entries, next_time = self.get_timed_out_info()
             if this_cleaning == self.cleaning_task:
@@ -598,7 +774,6 @@ class Cache:
                 cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> found time for next clean is none, no further cleaning possible current state {self.cleaning_status}")
             else:
                 cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> found next round is at {next_time}, {(next_time - starttime).total_seconds()} from now")
-            
             try:
                 cleaning_logger.debug(f"cleaning task id <{id(this_cleaning)}> doing actual node pruning current state {self.cleaning_status}")
                 self.clean(timed_out_entries, next_time=next_time, this_cleaning=this_cleaning)
@@ -611,14 +786,14 @@ class Cache:
                     self.cleaning_status["next"] = None
                     cleaning_logger.warning(f"cleaning task id <{id(this_cleaning)}> at failure changed state to stopped {self.cleaning_status}")
                 return
-            
+
             # the task executing at this point may be one in handler or old one that started but ran over time but stayed running to make sure
             # nodes it found are cleaned
             if self.cleaning_status["state"] in [CLEANING_STATE.STOPPING, CLEANING_STATE.STOPPED]:
                 # if cleaning is trying to stop, don't really want to loop for another clean. doesn't matter which task. so go to wrap up section
                 break
             elif this_cleaning == self.cleaning_task:
-                # only want to consider looping on main task, other ones are are only meant to finish current clean to make sure nodes are cleaned up 
+                # only want to consider looping on main task, other ones are are only meant to finish current clean to make sure nodes are cleaned up
                 #       in case the task restarts can't get to them
                 if next_time is None:
                     # cleans not needed currently so mark it differently from stopped to know its ok to auto start them up again
