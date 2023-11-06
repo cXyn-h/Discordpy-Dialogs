@@ -5,7 +5,7 @@ import src.DialogNodes.BaseType as BaseType
 class TestGraphNode(BaseType.BaseGraphNode):
     TYPE = "Test"
     DEFINITION='''
-options:[]'''
+options: []'''
     SCHEMA = '''
 sdfsdf'''
     # VERSION="1.0.0"

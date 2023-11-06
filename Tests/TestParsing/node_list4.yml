@@ -1,0 +1,11 @@
+---
+- id: Six
+  TTL: 300
+---
+nodes:
+---
+nodes: []
+---
+nodes:
+  - id: Seven
+    TTL: 300

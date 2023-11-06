@@ -74,6 +74,8 @@ def parse_version_string(version_string):
         version_tuple=(int(version_string[:first_dot]),int(version_string[first_dot+1:second_dot]), int(version_string[second_dot+1:]))
     except:
         raise Exception(f"{version_string} is invalid version, must have three period separated whole numbers")
+    if version_tuple[0] < 0 or version_tuple[1] < 0 or version_tuple[2] < 0:
+        raise Exception(f"{version_string} has negative values. not allowed")
     return version_tuple
 
 def validate_type(type_module, type_name):
