@@ -3,53 +3,53 @@ import src.utils.callbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 import pytest
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER])
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER])
 def f1(a, e):
     if a != "a" or e != "e":
         raise Exception(f"f1 Bad values")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER], has_parameter="optional")
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER], has_parameter="optional")
 def f2(a, e, v=None):
     if a != "a" or e != "e":
         raise Exception(f"f2 Bad values")
     print(f"f2 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER], has_parameter="always")
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER], has_parameter="always")
 def f3(a, e, v):
     if a != "a" or e != "e" or v != "v":
         raise Exception(f"f3 Bad values")
     print(f"f3 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f4(a, e, g):
     if a != "a" or e != "e" or g != "g":
         raise Exception(f"f4 Bad values")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional")
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional")
 def f5(a, e, g, v=None):
     if a != "a" or e != "e" or g != "g":
         raise Exception(f"f5 Bad values")
     print(f"f5 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always")
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always")
 def f6(a,e,g,v):
     if a != "a" or e != "e" or g != "g" or v != "v":
         raise Exception(f"f6 Bad values")
     print(f"f6 received a value of {v}")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION])
 def f7(a, e, g=None):
     if a != "a" or e != "e":
         raise Exception(f"f7 Bad values")
     print(f"f7 received a next_node of {g}")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional")
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional")
 def f8(a, e, g=None, v=None):
     if a != "a" or e != "e":
         raise Exception(f"f1 Bad values")
     print(f"f2 received a next_node of {g} and a value of {v}")
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always")
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always")
 def f9(a, e, v, g=None):
     if a != "a" or e != "e" or v != "v":
         raise Exception(f"f9 Bad values")

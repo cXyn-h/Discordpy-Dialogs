@@ -19,7 +19,7 @@ def save_quiz_answer(active_node, event, goal_node):
             goal_node.session.data["quiz"][active_node.graph_node.id] = event.data["custom_id"]
         elif event.data["component_type"] == discord.ComponentType.select.value:
             goal_node.session.data["quiz"][active_node.graph_node.id] = event.data["values"]
-cbUtils.set_callback_settings(save_quiz_answer, allowed=[POSSIBLE_PURPOSES.TRANSITION_ACTION])
+cbUtils.set_callback_settings(save_quiz_answer, allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_ACTION])
     
 
 async def report_quiz_answers(active_node, event):
@@ -30,14 +30,14 @@ async def report_quiz_answers(active_node, event):
         await active_node.message.edit(content = message_to_send)
     else:
         await DiscordFuncs.send_message(active_node, event, settings={"use_reply": True, "message":{"content":message_to_send}})
-cbUtils.set_callback_settings(report_quiz_answers, allowed=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(report_quiz_answers, allowed_sections=[POSSIBLE_PURPOSES.ACTION])
 
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION])
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION])
 async def dropbox_save_message(active_node, event):
     active_node.dropbox_message = event
 
-@cbUtils.callback_settings(allowed=[POSSIBLE_PURPOSES.ACTION], has_parameter="always", schema={"type":"object","properties":{"redirect":{"type":"object",
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter="always", schema={"type":"object","properties":{"redirect":{"type":"object",
         "properties":{"dest_channel_id":{"type":["string","integer"]}}, "required":["dest_channel_id"]}, "use_reply":{"type":"string",
         "enum":["ping","no_ping"]}},"required":["redirect"] })
 async def dropbox_send_message(active_node, event, settings):

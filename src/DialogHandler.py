@@ -186,9 +186,9 @@ class DialogHandler():
     ################################################################################################'''
 
     def register_function(self, func, override_settings={}):
-        permitted_purposes = func.allowed
-        if "allowed" in override_settings:
-            permitted_purposes = override_settings["allowed"]
+        permitted_purposes = func.allowed_sections
+        if "allowed_sections" in override_settings:
+            permitted_purposes = override_settings["allowed_sections"]
         
         if permitted_purposes is None or len(permitted_purposes) < 1:
             execution_reporting.warning(f"dialog handler tried registering a function <{func.__name__}> that does not have any permitted sections")
@@ -231,7 +231,7 @@ class DialogHandler():
             if escalate_errors:
                 raise Exception(f"checking if <{func_name}> can run during phase {section} but it is not registered")
             return False
-        if section not in self.functions[func_name]["ref"].allowed:
+        if section not in self.functions[func_name]["ref"].allowed_sections:
             execution_reporting.warn(f"checking if <{func_name}> can run during phase <{section}> but it is not allowed")
             if escalate_errors:
                 raise Exception(f"checking if <{func_name}> can run during phase {section} but it is not allowed")
@@ -643,7 +643,7 @@ class DialogHandler():
         '''
         # dialog_logger.debug(f"starting formatting parameters for function call. passed in: purpose <{purpose}>, a, e, g, v: <{id(active_node)}><{active_node.graph_node.id}>, <{event}>, <{goal_node}>, <{values}>")
         func_ref = self.functions[func_name]["ref"]
-        intended_purposes = [x in func_ref.allowed for x in [POSSIBLE_PURPOSES.FILTER,POSSIBLE_PURPOSES.ACTION,POSSIBLE_PURPOSES.TRANSITION_FILTER,POSSIBLE_PURPOSES.TRANSITION_ACTION]]
+        intended_purposes = [x in func_ref.allowed_sections for x in [POSSIBLE_PURPOSES.FILTER,POSSIBLE_PURPOSES.ACTION,POSSIBLE_PURPOSES.TRANSITION_FILTER,POSSIBLE_PURPOSES.TRANSITION_ACTION]]
         cross_transtion = (intended_purposes[2] or intended_purposes[3]) and (intended_purposes[0] or intended_purposes[1])
 
         args_list = [active_node, event]
