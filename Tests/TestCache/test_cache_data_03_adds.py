@@ -19,7 +19,7 @@ def test_add_data():
 
 def test_adding_empty_data():
     '''test adding weird data behaves ok and index on a field doesn't pick up empty'''
-    c = Cache.Cache(secondaryIndices=["val1"])
+    c = Cache.Cache(input_secondary_indices=["val1"])
     result = c.add("One")
 
     assert result is not None
@@ -44,7 +44,7 @@ def test_adding_empty_data():
 
 def test_add_data_indices():
     '''test indices are updating correctly in response to added simple data'''
-    c = Cache.Cache(secondaryIndices=["val1", "bogus", Cache.CollectionIndex("val3", "val3")])
+    c = Cache.Cache(input_secondary_indices=["val1", "bogus", Cache.CollectionIndex("val3", "val3")])
     result = c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3": [1]})
     assert result is not None
 
@@ -82,7 +82,7 @@ def test_add_data_indices():
 
 def test_add_overwrite_flag():
     '''test adding data for same key and using overwrite flag behaves correctly and indices respond'''
-    c = Cache.Cache(secondaryIndices=["val1", Cache.CollectionIndex("val3", "val3")])
+    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val3", "val3")])
     result = c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3": [1,2]})
     assert result is not None
     assert c.secondary_indices["val1"].pointers == {3:set(["One"])}
@@ -140,7 +140,7 @@ def test_add_all():
 
 def test_add_copy_rule():
     '''testing the rules for how to copy data into the cache work'''
-    c = Cache.Cache(secondaryIndices=["val1", "val2"])
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
     update_data = {"obj": set("a")}
     c.add("Two", update_data, addition_copy_rule=Cache.COPY_RULES.DEEP)
     update_data["obj"].add("b")
@@ -164,11 +164,11 @@ def test_add_copy_rule():
     del update_data["test2"]
 
 def test_add_auto_key():
-    c = Cache.Cache(secondaryIndices=["val1", "val2"])
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
     result = c.add(value={"val1": 3, "val2": "a"})
     assert result is not None
     assert len(c.data) == 1
     key = list(c.data.keys())[0]
-    assert {"val1": 3, "val2": "a"} == c.get(key, index_name="primary", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
+    assert {"val1": 3, "val2": "a"} == c.get(key, index_name="primary", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0].data
     assert c.secondary_indices["val1"].pointers == {3:set([key])}
     assert c.secondary_indices["val2"].pointers == {"a":set([key])}

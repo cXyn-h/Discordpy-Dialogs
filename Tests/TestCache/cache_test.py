@@ -15,8 +15,9 @@ def test_blank_cache_init():
 def test_init_index():
     '''test initializing an index sets data up'''
     # indices don't really care about name, but it does matter for a cache
-    test_ind = Cache.Index("primary")
+    test_ind = Cache.SimpleIndex("primary", "test")
     assert test_ind.name == "primary"
+    assert test_ind.col_name == "test"
     assert test_ind.cache is None
     assert test_ind.pointers == {}
     test_simple = Cache.SimpleIndex("test", "example")
@@ -33,7 +34,7 @@ def test_init_index():
 def test_index_set_cache():
     '''testing index can set cache reference after init and index any data added to cache before index got set'''
     #  Note, this functionalty is for catchup if index is added later or otherwise needs to reset
-    c = Cache.Cache(secondaryIndices=["val1"])
+    c = Cache.Cache(input_secondary_indices=["val1"])
     results = c.add_all({"One": {"id": "One", "val1": 3, "val2": [1,2]}, "Two": {"id": "Two", "val1": 3, "val2": [3,2]}})
     # this isn't complete setup of index, it doesn't get updates when entries are changed. done this way just to test functionality of set_cache
     index = Cache.SimpleIndex("val1","val1")
@@ -53,9 +54,9 @@ def test_index_set_cache():
 def test_init_cache_index_names():
     '''test initializing a cache given just names works. certain names should not be added to cache'''
     # invalid name should just be ignored, otherwise valid index created and resulting data changes
-    c = Cache.Cache(secondaryIndices=["primary"])
+    c = Cache.Cache(input_secondary_indices=["primary"])
     assert len(c.secondary_indices) == 0
-    c = Cache.Cache(secondaryIndices=["test", "primary"])
+    c = Cache.Cache(input_secondary_indices=["test", "primary"])
     assert len(c.secondary_indices) == 1
     assert "test" in c.secondary_indices
     testind = c.secondary_indices["test"]
@@ -65,7 +66,7 @@ def test_init_cache_index_names():
     assert testind.cache is c
     assert len(testind.pointers) == 0
     # repeats should be ignored
-    c = Cache.Cache(secondaryIndices=["test", "test"])
+    c = Cache.Cache(input_secondary_indices=["test", "test"])
     assert len(c.secondary_indices) == 1
 
 def test_init_index_and_cache():
@@ -73,7 +74,7 @@ def test_init_index_and_cache():
     # make sure creating index beforehand and initializing alao has valid result
     test_create_ind = Cache.SimpleIndex("test2", "test2")
     assert test_create_ind.cache is None
-    c = Cache.Cache(secondaryIndices=[test_create_ind])
+    c = Cache.Cache(input_secondary_indices=[test_create_ind])
     assert test_create_ind.cache is c
     assert len(test_create_ind.pointers) == 0
     assert len(c.secondary_indices) == 1
@@ -82,15 +83,14 @@ def test_init_index_and_cache():
     # reserved name should not work
     test_create_ind_2 = Cache.SimpleIndex("primary", "val3")
     test_create_ind_3 = Cache.CollectionIndex("primary", "val4")
-    test_create_ind_4 = Cache.Index("primary")
     assert test_create_ind_2.cache is None
-    c2 = Cache.Cache(secondaryIndices=[test_create_ind_2, test_create_ind_3, test_create_ind_4])
+    c2 = Cache.Cache(input_secondary_indices=[test_create_ind_2, test_create_ind_3])
     assert len(c2.secondary_indices) == 0
 
     # duplicates should be ignored
     test_create_ind2 = Cache.CollectionIndex("test2", "test2")
     test_create_ind3 = Cache.SimpleIndex("test2", "test2")
-    c4 = Cache.Cache(secondaryIndices=[test_create_ind2, test_create_ind3])
+    c4 = Cache.Cache(input_secondary_indices=[test_create_ind2, test_create_ind3])
     assert len(c4.secondary_indices) == 1
 
 def test_add_index():
@@ -126,18 +126,18 @@ def test_add_index():
 
 def test_add_not_index():
     '''make sure some bogus data does not cause changes'''
-    c = Cache.Cache(secondaryIndices=[[1,2,3], 4, object()])
+    c = Cache.Cache(input_secondary_indices=[[1,2,3], 4, object()])
     assert len(c.secondary_indices) == 0
 
 def test_get():
     '''test get from cache from different indices returns correct data'''
-    c = Cache.Cache(secondaryIndices=["val1", "val2"])
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
     # get by primary key that exists, should return single element list
     result = c.get("One", index_name="primary")
     assert len(result) == 1
-    assert type(result[0]) is not Cache.CacheEntry
-    assert result[0]["id"] == "One"
+    assert type(result[0]) is Cache.CacheEntry
+    assert result[0].data["id"] == "One"
     # should get default value if getting by a primary key that doesn't exist in cache
     result = c.get("asdf", index_name="primary")
     assert result is None
@@ -151,14 +151,14 @@ def test_get():
     # get on secondary index
     result = c.get("b", index_name="val2", default=None)
     assert len(result) == 1
-    assert type(result[0]) is not Cache.CacheEntry
-    assert result[0]["id"] == "Two"
+    assert type(result[0]) is Cache.CacheEntry
+    assert result[0].data["id"] == "Two"
 
     result = c.get(3, index_name="val1", default=None)
     assert len(result) == 2
-    assert type(result[0]) is not Cache.CacheEntry
-    assert type(result[1]) is not Cache.CacheEntry
-    id_list = [res["id"] for res in result]
+    assert type(result[0]) is Cache.CacheEntry
+    assert type(result[1]) is Cache.CacheEntry
+    id_list = [res.data["id"] for res in result]
     assert "Two" in id_list
     assert "One" in id_list
 
@@ -168,7 +168,7 @@ def test_get():
 
 def test_get_key():
     '''test getting the primary keys for what is indexed under different categories is correct'''
-    c = Cache.Cache(secondaryIndices=["val1", "val2"])
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
     # get by primary key that exists
     result = c.get_key("One", index_name="primary")
@@ -200,72 +200,74 @@ def test_get_key():
 
 def test_get_copy_rules():
     '''test applying rules for how to copy data in get method'''
-    c = Cache.Cache(secondaryIndices=["val1", "val2"], defualt_get_copy_rule=Cache.COPY_RULES.DEEP)
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"], defualt_get_copy_rule=Cache.COPY_RULES.DEEP)
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a", "obj": set()}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
 
     # test default gets applied
-    result = c.get("One", index_name="primary")
+    result = c.get("One", index_name="primary")[0]
+    print(result)
+    print(result.data)
     assert "asdf" not in c.data["One"].data
-    result[0]["asdf"] = "asdf"
+    result.data["asdf"] = "asdf"
     assert "asdf" not in c.data["One"].data
-    del result[0]["asdf"]
+    del result.data["asdf"]
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].add(1)
+    result.data["obj"].add(1)
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].remove(1)
+    result.data["obj"].remove(1)
     # test overridding copy rule in get to None
-    result = c.get("One", index_name="primary", override_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    result = c.get("One", index_name="primary", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
     assert "asdf" not in c.data["One"].data
-    result[0]["asdf"] = "asdf"
+    result.data["asdf"] = "asdf"
     assert "asdf" in c.data["One"].data
-    del result[0]["asdf"]
+    del result.data["asdf"]
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].add(1)
+    result.data["obj"].add(1)
     assert 1 in c.data["One"].data["obj"]
-    result[0]["obj"].remove(1)
+    result.data["obj"].remove(1)
     # test overridding copy rule in get to Shallow
-    result = c.get("One", index_name="primary", override_copy_rule=Cache.COPY_RULES.SHALLOW)
+    result = c.get("One", index_name="primary", override_copy_rule=Cache.COPY_RULES.SHALLOW)[0]
     assert "asdf" not in c.data["One"].data
-    result[0]["asdf"] = "asdf"
+    result.data["asdf"] = "asdf"
     assert "asdf" not in c.data["One"].data
-    del result[0]["asdf"]
+    del result.data["asdf"]
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].add(1)
+    result.data["obj"].add(1)
     assert 1 in c.data["One"].data["obj"]
-    result[0]["obj"].remove(1)
+    result.data["obj"].remove(1)
     # probs should test Attmpt, but that requires finding something that can't be pickled and causes error so leave that to later
-    result = c.get("a", index_name="val2")
+    result = c.get("a", index_name="val2")[0]
     assert "asdf" not in c.data["One"].data
-    result[0]["asdf"] = "asdf"
+    result.data["asdf"] = "asdf"
     assert "asdf" not in c.data["One"].data
-    del result[0]["asdf"]
+    del result.data["asdf"]
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].add(1)
+    result.data["obj"].add(1)
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].remove(1)
+    result.data["obj"].remove(1)
     
-    result = c.get("a", index_name="val2", override_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    result = c.get("a", index_name="val2", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
     assert "asdf" not in c.data["One"].data
-    result[0]["asdf"] = "asdf"
+    result.data["asdf"] = "asdf"
     assert "asdf" in c.data["One"].data
-    del result[0]["asdf"]
+    del result.data["asdf"]
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].add(1)
+    result.data["obj"].add(1)
     assert 1 in c.data["One"].data["obj"]
-    result[0]["obj"].remove(1)
+    result.data["obj"].remove(1)
 
-    result = c.get("a", index_name="val2", override_copy_rule=Cache.COPY_RULES.SHALLOW)
+    result = c.get("a", index_name="val2", override_copy_rule=Cache.COPY_RULES.SHALLOW)[0]
     assert "asdf" not in c.data["One"].data
-    result[0]["asdf"] = "asdf"
+    result.data["asdf"] = "asdf"
     assert "asdf" not in c.data["One"].data
-    del result[0]["asdf"]
+    del result.data["asdf"]
     assert 1 not in c.data["One"].data["obj"]
-    result[0]["obj"].add(1)
+    result.data["obj"].add(1)
     assert 1 in c.data["One"].data["obj"]
-    result[0]["obj"].remove(1)
+    result.data["obj"].remove(1)
 
 def test_clear():
-    c = Cache.Cache(secondaryIndices=["val1", "val2"])
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
     c.clear()
     assert len(c.data) == 0

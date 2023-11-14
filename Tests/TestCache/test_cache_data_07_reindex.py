@@ -3,22 +3,22 @@ import src.utils.Cache as Cache
 
 def test_reindex():
     '''test reindex updates indices when setting a value'''
-    c = Cache.Cache(secondaryIndices=["val1", "val2"])
+    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
     c.add("One", {"id": "One", "val1": 3, "val2": "a"})
     entry = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
-    entry["val1"] = 4
+    entry.data["val1"] = 4
     assert c.secondary_indices["val1"].pointers == {3:set(["One"])}
-    print(entry)
+    print(entry.data)
     c.reindex(updated_keys="One")
     print(c.secondary_indices["val1"].pointers)
     assert c.secondary_indices["val1"].pointers == {4:set(["One"])}
 
 def test_collection_reindex():
     '''test reindex updates collection index on adding another element to list'''
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])})
     entry = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
-    entry["val3"].add(4)
+    entry.data["val3"].add(4)
     assert c.data["One"].data == {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3,4])}
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["One"])}
     c.reindex(updated_keys="One")
@@ -26,11 +26,11 @@ def test_collection_reindex():
 
 def test_collection_reindex_clear():
     '''test reindex clears indices when emptying data'''
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])})
     entry = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
-    entry["val3"].clear()
-    del entry["val2"]
+    entry.data["val3"].clear()
+    del entry.data["val2"]
     assert c.data["One"].data == {"id": "One", "val1": 3, "val3":set()}
     assert c.secondary_indices["val2"].pointers == {"a":set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["One"])}
@@ -39,7 +39,7 @@ def test_collection_reindex_clear():
     assert c.secondary_indices["val2"].pointers == {}
 
 def test_reindex_all_entries():
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])}, "Two": {"id": "Two", "val1": 16, "val2": "b", "val3":set([5,6])}})
     assert c.secondary_indices["val2"].pointers == {"a":set(["One"]), "b":set(["Two"])}
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
@@ -55,7 +55,7 @@ def test_reindex_all_entries():
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["Two"])}
 
 def test_reindex_nonexistant_keys():
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])}, "Two": {"id": "Two", "val1": 16, "val2": "b", "val3":set([5,6])}})
     c.data["One"].data["val3"] = set([1,2])
     assert c.data["One"].data == {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2])}
@@ -65,41 +65,42 @@ def test_reindex_nonexistant_keys():
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
 
 def test_update_catches_reindex():
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])}, "Two": {"id": "Two", "val1": 16, "val2": "b", "val3":set([5,6])}})
 
-    data = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
-    data["val3"].remove(3)
+    entry = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
+    entry.data["val3"].remove(3)
     assert c.data["One"].data == {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2])}
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
 
-    c.update("One", data, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
-    assert id(data) == id(c.data["One"].data)
+    c.update("One", entry.data, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    assert id(entry.data) == id(c.data["One"].data)
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
 
 
 def test_set_catches_reindex():
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])}, "Two": {"id": "Two", "val1": 16, "val2": "b", "val3":set([5,6])}})
 
-    data = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
-    data["val3"].remove(3)
+    entry = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
+    entry.data["val3"].remove(3)
     assert c.data["One"].data == {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2])}
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
 
-    c.set("One", data, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
-    assert id(data) == id(c.data["One"].data)
+    c.set("One", entry.data, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    assert id(entry.data) == id(c.data["One"].data)
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
 
 def test_add_catches_reindex():
-    c = Cache.Cache(secondaryIndices=[Cache.CollectionIndex("val3", "val3"), "val2"])
+    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val3", "val3"), "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2,3])}, "Two": {"id": "Two", "val1": 16, "val2": "b", "val3":set([5,6])}})
 
-    data = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
-    data["val3"].remove(3)
+    entry = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
+    entry.data["val3"].remove(3)
     assert c.data["One"].data == {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2])}
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 3:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
 
-    c.add("One", data, or_overwrite=True, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
-    assert id(data) == id(c.data["One"].data)
+    c.add("One", entry.data, or_overwrite=True, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    assert c.data["One"].data == {"id": "One", "val1": 3, "val2": "a", "val3":set([1,2])}
+    assert id(entry.data) == id(c.data["One"].data)
     assert c.secondary_indices["val3"].pointers == {1:set(["One"]), 2:set(["One"]), 5:set(["Two"]), 6:set(["Two"])}
