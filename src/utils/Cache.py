@@ -72,7 +72,6 @@ class AbstractCacheEntry:
                 setattr(result, variable, copy.copy(item))
             else:
                 setattr(result, variable, item)
-        print(vars(result))
         return result
     
     def __deepcopy__(self, memo):
@@ -84,7 +83,6 @@ class AbstractCacheEntry:
                 setattr(result, variable, copy.deepcopy(item, memo))
             else:
                 setattr(result, variable, item)
-        print("in deepcopy method, result looks like", vars(result))
         return result
     
     def set(self, incoming):
@@ -99,8 +97,9 @@ class CacheEntry(AbstractCacheEntry):
         self.data = data
 
     def set(self, incoming):
-        self.data.clear()
-        self.data.update(incoming)
+        if id(incoming) != id(self.data):
+            self.data.clear()
+            self.data.update(incoming)
 
     def update(self, incoming, field_update_strat:UPDATE_STRAT):
         if id(incoming) == id(self.data):
@@ -670,9 +669,8 @@ class Cache:
                         to_update = copy.deepcopy(value)
                     except Exception:
                         to_update = copy.copy(value)
-                
-                if id(value) != id(self.data.get(key).data):
-                    self.data[key].set(to_update)
+
+                self.data[key].set(to_update)
                 self.data.get(key).set_TTL(timedelta(seconds=self.default_timeout))
                 for index in self.secondary_indices.values():
                     index.set_entry(self.data.get(key))

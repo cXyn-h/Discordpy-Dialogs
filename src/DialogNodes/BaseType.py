@@ -5,9 +5,10 @@ import typing
 import src.utils.SessionData as SessionData
 from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
-class BaseGraphNode():
-    VERSION = "3.6.0"
+import src.utils.Cache as Cache
 
+class BaseGraphNode(Cache.AbstractCacheEntry):
+    VERSION = "3.6.0"
     # this specifies what fields will be copied into graph node
     DEFINITION='''
 options:
@@ -152,6 +153,7 @@ required: ["id"]
         return unique_next_nodes, function_set_list
 
     def __init__(self, options:dict) -> None:
+        super().__init__(id(self), timeout=-1)
         for key, option in options.items():
             setattr(self, key, option)
 
@@ -222,26 +224,15 @@ required: ["id"]
             return []
         return self.close_actions
 
-
-class BaseNode():
+class BaseNode(Cache.AbstractCacheEntry):
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
+        super().__init__(id(self), timeout = timeout_duration.total_seconds())
         self.graph_node = graph_node
         self.session = session
         self.status = ITEM_STATUS.INACTIVE
         self.handler = None
 
         self.set_TTL(timeout_duration)
-
-    def set_TTL(self, timeout_duration=None):
-        if timeout_duration is None:
-            # should not really happen
-            timeout_duration = timedelta(self.graph_node.TTL)
-
-        if timeout_duration.total_seconds() == -1:
-            # specifically, don't time out
-            self.timeout = None
-        else:
-            self.timeout = datetime.utcnow() + timeout_duration
 
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()
