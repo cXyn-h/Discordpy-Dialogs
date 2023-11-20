@@ -18,11 +18,11 @@ parsing_logger.setLevel(logging.INFO)
 
 #TODO: this allows globally, any instances of needing to limit to subsets? -ie would this need to be in a class
 ALLOWED_NODE_TYPES = {}
-'''list of node types that the parser can handle'''
+'''dinctionary of node type name to node type module that the parser can handle. module should contain both GraphNode and active Node of the type'''
 NODE_DEFINITION_CACHE = {}
-'''temp store of parsed definition for node types, type must appear in ALOWED_NODE_TYPES, read in as string, cached as dict'''
+'''deprecated temp store of parsed definition for node types, type must appear in ALOWED_NODE_TYPES, read in as string, cached as dict'''
 NODE_SCHEMA_CACHE = {}
-'''temp store of parsed schema for node types, type must appear in ALLOWED_NODE_TYPES, read in as string, cached as dict'''
+'''deprecated temp store of parsed schema for node types, type must appear in ALLOWED_NODE_TYPES, read in as string, cached as dict'''
 #~~~~~~~~~ FURTHER SETUP OF THESE ARE DONE AFTER DEFINING FUNCTIONS FOR HANDLING AND REGESTERING ~~~~~~~~~
 
 def register_node_type(type_module, type_name, re_register = False):
@@ -95,7 +95,7 @@ def validate_type(type_module, type_name):
     if not hasattr(type_module, type_name+"Node") or not inspect.isclass(getattr(type_module, type_name+"Node")):
         raise Exception(f"cannot find a <{type_name}Node> class in node type <{type_name}> module.")
     
-    #TODO: check duck typing: all needed methods are there? lots of methods though
+    #TODO: validate duck typing: all needed methods are there? lots of methods though
     
     graph_node = getattr(type_module, type_name+"GraphNode")
     if graph_node.TYPE != type_name:
@@ -135,9 +135,9 @@ def load_type(node_type):
     parsing_logger.debug(f"loading type <{node_type}>")
     try:
         graph_node = getattr(ALLOWED_NODE_TYPES[node_type], node_type+"GraphNode")
-        NODE_DEFINITION_CACHE[node_type] = yaml.safe_load(graph_node.DEFINITION)
+        NODE_DEFINITION_CACHE[node_type] = graph_node.get_node_fields()
         # dev creating node types should make sure schema for variables introduced by that type is valid
-        NODE_SCHEMA_CACHE[node_type] = yaml.safe_load(graph_node.SCHEMA)
+        NODE_SCHEMA_CACHE[node_type] = graph_node.get_node_schema()
     except KeyError as e:
         raise Exception(f"tried to load information about node type named <{node_type}> but couldn't. type isn't registered")
     except Exception as e:
@@ -233,13 +233,16 @@ def parse_node(yaml_node, location_printout=""):
         graph node class that represents the type specified in yaml'''
     parsing_logger.debug(f"parsing node.{' located in '+location_printout if len(location_printout) > 0 else ''}")
     node_type = validate_yaml_node(yaml_node, location_printout)
-    
+
     # get all options that need to be filled in GraphNode, design is types can extend each other to add more fields
-    # NOTE: this part will need to be changed if allowing extending from nodes other than base
-    all_options = [*NODE_DEFINITION_CACHE["Base"]["options"]]
-    if node_type != "Base":
-        # techinally allows for child class to override definitions by loading it later.
-        all_options.extend(NODE_DEFINITION_CACHE[node_type]["options"])
+    all_options = getattr(ALLOWED_NODE_TYPES[node_type], node_type+"GraphNode").get_node_fields()
+    
+    # NOTE: This is older code for when each node stored only its own options and didn't have a way to combine it, get_node_fields method takes care of that now
+    #       if that method breaks, need something like this
+    # all_options = [*NODE_DEFINITION_CACHE["Base"]["options"]]
+    # if node_type != "Base":
+    #     # techinally allows for child class to override definitions by loading it later since it re-sets the value.
+    #     all_options.extend(NODE_DEFINITION_CACHE[node_type]["options"])
 
     parsing_logger.debug(f"options to look for in node are (note there might be repeats becuase option appears in both child and parent nodes): <{all_options}>")
     graph_node_model = {}
@@ -307,12 +310,7 @@ def validate_yaml_node(yaml_node, location_printout=""):
         load_type(node_type)
 
     try:
-        if node_type != "Base":
-            #TODO: probably need something to merge schemas, this will treat the two as independent, and can't use child classes to override base schema
-            #TODO: also probably need to make recursive to handle extend chains
-            validate(yaml_node, {"allOf": [NODE_SCHEMA_CACHE[node_type], NODE_SCHEMA_CACHE["Base"]]})
-        else:
-            validate(yaml_node, NODE_SCHEMA_CACHE["Base"])
+        validate(yaml_node, getattr(ALLOWED_NODE_TYPES[node_type], node_type+"GraphNode").get_node_schema())
     except ValidationError as ve:
         # schema validation failed. want to catch and print the error information in a format that is easier to debug than default.
         # error printout on terminal still prints out the original version of the error before the custom one though

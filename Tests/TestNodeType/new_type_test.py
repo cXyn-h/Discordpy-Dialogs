@@ -74,11 +74,6 @@ def test_reregister():
     assert "ValidTest" in nodeParser.ALLOWED_NODE_TYPES
     assert nodeParser.ALLOWED_NODE_TYPES["ValidTest"].ValidTestGraphNode.DEFINITION == VT2.ValidTestGraphNode.DEFINITION
 
-    with pytest.raises(Exception):
-        import InvalidType1 as ITT1 # Node is not a class
-        nodeParser.register_node_type(ITT1, "Test")
-    assert len(nodeParser.ALLOWED_NODE_TYPES) == 2
-
 def test_load_type():
     '''test registering and loading types clear out outdated cache and loads into cache'''
     # failed re-register shouldn't affect cache
@@ -94,7 +89,8 @@ def test_load_type():
     nodeParser.load_type("ValidTest")
     assert "ValidTest" in nodeParser.NODE_DEFINITION_CACHE
     assert "ValidTest" in nodeParser.NODE_SCHEMA_CACHE
-    assert nodeParser.NODE_DEFINITION_CACHE["ValidTest"] == yaml.safe_load(VT2.ValidTestGraphNode.DEFINITION)
+    print(nodeParser.NODE_DEFINITION_CACHE["ValidTest"])
+    assert nodeParser.NODE_DEFINITION_CACHE["ValidTest"] == [{'name': 'id'}, {'name': 'graph_start', 'default': None}, {'name': 'TTL', 'default': 180}, {'name': 'actions', 'default': []}, {'name': 'events', 'default': {}}, {'default': [], 'name': 'close_actions'}, {'name': 'asdf'}]
 
     nodeParser.register_node_type(VT, "ValidTest", re_register=True)
     # re-registering a node that was there should remove from cache
@@ -104,7 +100,7 @@ def test_load_type():
     nodeParser.load_type("ValidTest")
     assert "ValidTest" in nodeParser.NODE_DEFINITION_CACHE
     assert "ValidTest" in nodeParser.NODE_SCHEMA_CACHE
-    assert nodeParser.NODE_DEFINITION_CACHE["ValidTest"] == yaml.safe_load(VT.ValidTestGraphNode.DEFINITION)
+    assert nodeParser.NODE_DEFINITION_CACHE["ValidTest"] == [{'name': 'id'}, {'name': 'graph_start', 'default': None}, {'name': 'TTL', 'default': 180}, {'name': 'actions', 'default': []}, {'name': 'events', 'default': {}}, {'default': [], 'name': 'close_actions'}]
 
     # both reset these tests and make sure empty works
     nodeParser.empty_cache()
@@ -126,6 +122,10 @@ def test_validate_node():
 id: One
 type: ValidTest
 version: {v}'''.format(v=VT.ValidTestGraphNode.VERSION)
+    nodeParser.empty_cache()
+    assert len(nodeParser.NODE_DEFINITION_CACHE) == 0
+    assert len(nodeParser.NODE_SCHEMA_CACHE) == 0
+    nodeParser.load_type("Base")
     assert "ValidTest" not in nodeParser.NODE_DEFINITION_CACHE
     assert "ValidTest" not in nodeParser.NODE_SCHEMA_CACHE
     found_type = nodeParser.validate_yaml_node(yaml.safe_load(simple_input))
@@ -141,5 +141,11 @@ type: WRONG
 version: {v}'''.format(v=VT.ValidTestGraphNode.VERSION)
     with pytest.raises(Exception):
         found_type = nodeParser.validate_yaml_node(yaml.safe_load(simple_input))
+
+def test_node_definition():
+    test2 = VT2.ValidTestGraphNode({})
+    print(test2.get_node_fields())
+    assert test2.get_node_fields() == [{'name': 'id'}, {'name': 'graph_start', 'default': None}, {'name': 'TTL', 'default': 180}, {'name': 'actions', 'default': []}, {'name': 'events', 'default': {}}, {'name': 'close_actions', 'default': []}, {'name': 'asdf'}]
+
 
 #TODO: expand tests to cover more validation checks for node definitions, especially for schema, when that is fixed

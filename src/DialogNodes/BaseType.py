@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta
 import typing
 import src.utils.SessionData as SessionData
+import yaml
+import copy
 from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
 import src.utils.Cache as Cache
@@ -223,6 +225,43 @@ required: ["id"]
         if self.close_actions is None:
             return []
         return self.close_actions
+    
+    @classmethod
+    def get_node_fields(cls):
+        '''merges together the config and inherited config for what fields active nodes of this type should have and caches and returns it.
+        Child classes override parents' fields'''
+        # note, hasattr uses getattr which default also looks in parent classes, which sensibly also applies to class variables. don't use it for something that needs to be defined per class independent of parents'
+        if "PARSED_DEFINITION" in vars(cls).keys() and cls.PARSED_DEFINITION is not None:
+            # if there's a previous result of parsed definition cached, use that
+            return cls.PARSED_DEFINITION
+        # nothing cached, need to actually find definitions for this class
+        mro_list = cls.__mro__
+        final_definitions = {}
+        parent_definitions = mro_list[1].get_node_fields() if len(mro_list) > 1 and hasattr(mro_list[1], "get_node_fields") else {}
+        for option in parent_definitions:
+            final_definitions[option["name"]] = copy.deepcopy(option)
+
+        self_modifications = yaml.safe_load(cls.DEFINITION)
+        for option in self_modifications["options"]:
+            final_definitions[option["name"]] = option
+
+        cls.PARSED_DEFINITION = list(final_definitions.values())
+        return list(final_definitions.values())
+    
+    @classmethod
+    def get_node_schema(cls):
+        #TODO: probably need something to merge schemas, this will treat the two as independent, and can't use child classes to override base schema
+        if "PARSED_SCHEMA" in vars(cls).keys() and cls.PARSED_SCHEMA is not None:
+            # if there's a previous result of parsed schema cached, use that
+            return cls.PARSED_SCHEMA
+        mro_list = cls.__mro__
+        final_schema = mro_list[1].get_node_schema() if len(mro_list) > 1 and hasattr(mro_list[1], "get_node_schema") else {"allOf": []}
+
+        self_schema = yaml.safe_load(cls.SCHEMA)
+        final_schema["allOf"].append(self_schema)
+        cls.PARSED_SCHEMA = final_schema
+        return copy.deepcopy(final_schema)
+
 
 class BaseNode(Cache.AbstractCacheEntry):
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
