@@ -265,13 +265,11 @@ required: ["id"]
 
 class BaseNode(Cache.AbstractCacheEntry):
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
-        super().__init__(id(self), timeout = timeout_duration.total_seconds())
+        super().__init__(id(self), timeout = timeout_duration.total_seconds() if timeout_duration else -1)
         self.graph_node = graph_node
         self.session = session
         self.status = ITEM_STATUS.INACTIVE
         self.handler = None
-
-        self.set_TTL(timeout_duration)
 
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()
@@ -288,7 +286,7 @@ class BaseNode(Cache.AbstractCacheEntry):
 
     def is_active(self):
         return self.status == ITEM_STATUS.ACTIVE
-    
+
     def notify_closing(self):
         self.status = ITEM_STATUS.CLOSING
 

@@ -1,6 +1,7 @@
 import pytest
 import src.utils.Cache as Cache
 import src.DialogNodes.BaseType as BaseType
+from src.DialogNodes.CacheNodeIndex import CacheNodeIndex
 import src.DialogNodeParsing as NodeParser
 import yaml
 
@@ -77,3 +78,77 @@ TTL: 300'''
     c.delete("One")
     assert "One" not in c.data
     assert loaded_node.cache is None
+
+def test_index_add_active():
+    input1='''
+id: One
+events:
+    event1:
+    event2:
+    event3:'''
+    loaded_node = NodeParser.parse_node(yaml.safe_load(input1))
+
+    active_node = BaseType.BaseNode(loaded_node)
+
+    c = Cache.Cache(input_secondary_indices=[CacheNodeIndex("events", "event")])
+
+    c.add(id(active_node), active_node, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    assert c.secondary_indices["events"].pointers == {"event1": set([id(active_node)]), "event2": set([id(active_node)]), "event3": set([id(active_node)])}
+    assert c.data[id(active_node)].secondary_keys == {"events": ["event1", "event2", "event3"]}
+
+def test_index_delete_active():
+    input1='''
+id: One
+events:
+    event1:
+    event2:
+    event3:'''
+    loaded_node = NodeParser.parse_node(yaml.safe_load(input1))
+    active_node = BaseType.BaseNode(loaded_node)
+
+    c = Cache.Cache(input_secondary_indices=[CacheNodeIndex("events", "event")])
+
+    c.add(id(active_node), active_node, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    assert c.secondary_indices["events"].pointers == {"event1": set([id(active_node)]), "event2": set([id(active_node)]), "event3": set([id(active_node)])}
+    assert c.data[id(active_node)].secondary_keys == {"events": ["event1", "event2", "event3"]}
+
+    c.delete(id(active_node))
+    assert c.secondary_indices["events"].pointers == {}
+    assert active_node.secondary_keys == {"events": ["event1", "event2", "event3"]}
+
+def test_reindex():
+    input1='''
+id: One
+events:
+    event1:
+    event2:
+    event3:'''
+    loaded_node = NodeParser.parse_node(yaml.safe_load(input1))
+    active_node = BaseType.BaseNode(loaded_node)
+
+    index = CacheNodeIndex("events", "event")
+
+    c = Cache.Cache()
+
+    # add before index is there to simulate changes in data
+    c.add(id(active_node), active_node, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+
+    # this will not update things correctly, but link them together which is only good for testing
+    index.cache = c
+    c.secondary_indices["events"] = index
+    assert c.secondary_indices["events"].pointers == {}
+
+    c.reindex()
+    assert c.secondary_indices["events"].pointers == {"event1": set([id(active_node)]), "event2": set([id(active_node)]), "event3": set([id(active_node)])}
+    assert c.data[id(active_node)].secondary_keys == {"events": ["event1", "event2", "event3"]}
+
+    # make sure reindex picks up changes correctly
+    del loaded_node.events["event3"]
+    assert c.secondary_indices["events"].pointers == {"event1": set([id(active_node)]), "event2": set([id(active_node)]), "event3": set([id(active_node)])}
+    assert c.data[id(active_node)].secondary_keys == {"events": ["event1", "event2", "event3"]}
+
+    c.secondary_indices["events"].reindex()
+    assert c.secondary_indices["events"].pointers == {"event1": set([id(active_node)]), "event2": set([id(active_node)])}
+    assert c.data[id(active_node)].secondary_keys == {"events": ["event1", "event2"]}
+
+#TODO: add testing index on item update/set if/when updating nodes is supported
