@@ -209,7 +209,16 @@ class AbstractIndex:
             if len(self.pointers[secondary_key]) == 0:
                 del self.pointers[secondary_key]
 
-    def reindex(self, updated_keys:'typing.Union[list[str], None]'=None):
+    def reindex(self, updated_keys:'typing.Union[set[str], list[str], None]'=None):
+        ''' Indices might become out of date compared to data its supposed to index. Reindex is meant to remove old values and update with new secondary keys. Depends on being able to access cache for entry data and 
+        expects updated data to be stored in cache before call. also updates the entry with what secondary keys were used for this index
+        
+        Parameters
+        ---
+        * updated_keys -`typing.Union[set[str], list[str], None]`
+            iterable group of primary keys whose data fields were updated and now indices need to be updated to reflect changes. expecting access to cache and changes to data are already applied to 
+            find what secondary keys were updated for the given p-keys. If value is None, assumes want to update all keys
+        '''
         if not self.cache:
             # only passed keys currently because want to match function signiture with cache's to make it less confusing, but this makes it dependent on linked cache
             # so early check and break if its impossible to do
@@ -220,24 +229,21 @@ class AbstractIndex:
         cachev2_logger.info(f"doing reindex for index {self.name}, keys {updated_keys}")
 
         for pk in updated_keys:
-            if pk not in self.cache:
-                # fail safe to make sure things are ok
-                cachev2_logger.debug(f"found item {pk} not in cache")
-                continue
-            entry = self.cache.get(pk, index_name='primary', override_copy_rule=COPY_RULES.ORIGINAL)[0]
-            cachev2_logger.info(f"item {pk} in cache, data is currently {entry.data}")
+            previous_keys = []
             try:
+                entry = self.cache.get(pk, index_name='primary', override_copy_rule=COPY_RULES.ORIGINAL)[0]
+                cachev2_logger.info(f"item {pk} in cache, data is currently {entry.data}")
                 # using the entry object to record what secondary keys were used, since indices are responsible for the
                 #   keys used, it doubles as a record of what the keys were last time any official-update-function
                 #   updated data
                 previous_keys = entry.secondary_keys.get(self.name, [])
             except Exception as e:
-                # failsafe for duck typed entries
-                previous_keys = []
+                pass
             current_keys = self.parse_for_keys(entry)
             if previous_keys == []:
                 cachev2_logger.debug(f"emergency cleanup of index {self.name}")
-                # assuming something really wrong or index just decides to use clear capability
+                # either index isn't storing previous keys in entry, or something went wrong and saved previous keys were cleared
+                # assuming in this case that its likely actual index data is incorrect so need some extra cleanup
                 self.emergency_cleanup(delete_pks=[pk])
             if current_keys != previous_keys:
                 cachev2_logger.debug(f"reindexing item {pk} for index {self.name}")
@@ -251,8 +257,15 @@ class AbstractIndex:
                 except Exception as e:
                     pass
 
-    def emergency_cleanup(self, delete_pks = None):
-        '''check all recorded clean up any references to any key in the passed in list'''
+    def emergency_cleanup(self, delete_pks:'typing.Union[set[str], list[str], None]' = None):
+        '''
+        Indices might become out of date compared to data its supposed to index. emergency cleanup is meant to just check all recorded information in this index 
+        and clean up any references to the keys in the passed in list.
+        
+        Parameters
+        ---
+        * delete_pks - `typing.Union[set[str], list[str], None]`
+            interable group of keys that should be removed from indexing info. If value is none, assumes want to clear all keys from this index'''
         if delete_pks is None:
             self.pointers.clear()
             return
@@ -265,10 +278,19 @@ class AbstractIndex:
 
     def iter(self, key):
         '''creates and returns an interator through all primary keys of entries that fall under given key in this index'''
-        return iter(self.pointers.get(key, set()))   
+        return iter(self.pointers.get(key, set()))
 
     def __len__(self):
         return len(self.pointers) 
+    
+    def keys(self):
+        return self.pointers.keys()
+
+    def values(self):
+        return self.pointers.values()
+
+    def items(self):
+        return self.pointers.items()
 
     def get(self, key, default=None):
         '''index retrive primary keys that fit the given key in this index'''
@@ -764,6 +786,7 @@ class Cache:
         return iter(self.data.items())
 
     def iter(self, key, index_name="primary"):
+        '''extra helper for getting an iterator over entries found at specific key and index'''
         if index_name == "primary" or index_name == "":
             if key in self.data:
                 return iter([self.data.get(key)])
@@ -776,11 +799,29 @@ class Cache:
     def __len__(self):
         return len(self.data)
 
-    def keys(self):
-        return self.data.keys()
+    def keys(self, index_name='primary'):
+        if index_name == 'primary':
+            return self.data.keys()
+        elif index_name in self.secondary_indices:
+            return self.secondary_indices[index_name].keys()
+        else:
+            return None
 
-    def values(self):
-        return self.data.values()
+    def values(self, index_name='primary'):
+        if index_name == 'primary':
+            return self.data.values()
+        elif index_name in self.secondary_indices:
+            return self.secondary_indices[index_name].values()
+        else:
+            return None
+
+    def items(self, index_name='primary'):
+        if index_name == 'primary':
+            return self.data.items()
+        elif index_name in self.secondary_indices:
+            return self.secondary_indices[index_name].items()
+        else:
+            return None
 
     # NOTE: This task is not built for canceling. canceling can cause stopping in middle of custom cleanup methods, no tracking currently to prevent double calls to methods.
     async def clean_task(self, delay:float):
