@@ -264,8 +264,9 @@ required: ["id"]
 
 
 class BaseNode(Cache.AbstractCacheEntry):
+    DO_NOT_COPY_VARS = ["handler", "cache"]
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
-        super().__init__(id(self), timeout = timeout_duration.total_seconds() if timeout_duration else -1)
+        super().__init__(id(self), timeout = timeout_duration.total_seconds() if timeout_duration is not None else -1)
         self.graph_node = graph_node
         self.session = session
         self.status = ITEM_STATUS.INACTIVE

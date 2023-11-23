@@ -40,6 +40,7 @@ async def test_clean_info_finds_existing_next():
 
     await h.start_at("One", "test", {})
     await h.start_at("Two", "test", {})
+    # node One has TTL of 0, Two has 50
     now = datetime.utcnow()
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPED
     timed_out_nodes, timed_out_sessions, next_time = h.get_timed_out_info()
@@ -63,7 +64,7 @@ async def test_clean_info_finds_timed_out_closing_node():
     h.setup_from_files(["Tests/TestCLeaning/node_list1.yml"])
 
     await h.start_at("One", "test", {})
-    act_node_one = [x for x in h.active_nodes.values() if x.graph_node.id == "One"][0]
+    act_node_one = [x for x in h.active_node_cache.values() if x.graph_node.id == "One"][0]
     await h.start_at("Two", "test", {})
     now = datetime.utcnow()
 
@@ -125,18 +126,18 @@ async def test_one_clean_is_right():
     started = h.start_cleaning()
     assert started == True
     assert h.cleaning_status["state"] == CLEANING_STATE.STARTING
-    assert len(h.active_nodes) == 2
+    assert len(h.active_node_cache) == 2
     await asyncio.sleep(0.5)
     # let cleaning actually start, make sure is recorded as such and now is this cycle and next is correct for node two
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
     assert abs((h.cleaning_status["now"] - start_time).total_seconds()) < 0.5
     assert abs((h.cleaning_status["next"] - start_time - timedelta(seconds=5)).total_seconds()) < 0.5
-    assert len(h.active_nodes) == 1
-    assert "Two" in [x.graph_node.id for x in h.active_nodes.values()]
+    assert len(h.active_node_cache) == 1
+    assert "Two" in [x.graph_node.id for x in h.active_node_cache.values()]
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
     # at this point clean task finished this round and is sleeping for next round (longer sleep) and state won't change until it wakes up again
     await asyncio.sleep(5)
-    assert len(h.active_nodes) == 0
+    assert len(h.active_node_cache) == 0
     assert h.cleaning_status["state"] == CLEANING_STATE.PAUSED
 
 @pytest.mark.asyncio
@@ -153,7 +154,7 @@ async def test_stop_clean():
     started = h.start_cleaning()
     assert started == True
     assert h.cleaning_status["state"] == CLEANING_STATE.STARTING
-    assert len(h.active_nodes) == 2
+    assert len(h.active_node_cache) == 2
     await asyncio.sleep(0.5)
     # let cleaning actually start, make sure is recorded as such and now is this cycle and next is correct for node two
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
@@ -161,13 +162,13 @@ async def test_stop_clean():
     assert abs((h.cleaning_status["next"] - start_time - timedelta(seconds=5)).total_seconds()) < 0.5
     res = h.stop_cleaning()
     assert res == True
-    assert len(h.active_nodes) == 1
-    assert "Two" in [x.graph_node.id for x in h.active_nodes.values()]
+    assert len(h.active_node_cache) == 1
+    assert "Two" in [x.graph_node.id for x in h.active_node_cache.values()]
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPING
     # at this point clean task finished this round and is sleeping for next round (longer sleep) and state won't change until it wakes up again
     await asyncio.sleep(5)
-    assert len(h.active_nodes) == 1
-    assert "Two" in [x.graph_node.id for x in h.active_nodes.values()]
+    assert len(h.active_node_cache) == 1
+    assert "Two" in [x.graph_node.id for x in h.active_node_cache.values()]
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPED
 
 @pytest.mark.asyncio
@@ -255,7 +256,7 @@ async def test_clean_should_never_run():
     if counter == 20:
         assert "might be long running clean, or other weirdness" == "fix that"
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPED
-    assert len(h.active_nodes) == 1
+    assert len(h.active_node_cache) == 1
 
 @pytest.mark.asyncio
 async def test_cleaning_unpauses():
@@ -299,7 +300,7 @@ async def test_two_task_interference():
     assert abs((h.cleaning_status["next"] - timedelta(seconds=3.5) - datetime.utcnow()).total_seconds()) < 0.5
     assert h.cleaning_task is not None
     assert h.cleaning_task is not second_clean
-    assert len(h.active_nodes) == 1
+    assert len(h.active_node_cache) == 1
     assert not h.cleaning_task.done()
     assert second_clean.done()
 
@@ -314,9 +315,9 @@ async def test_clean_past_next_time():
     start_time = datetime.utcnow()
 
     await h.start_at("Two", "test", {})
-    act_node_two_one = [x for x in h.active_nodes.values() if x.graph_node.id == "Two"][0]
+    act_node_two_one = [x for x in h.active_node_cache.values() if x.graph_node.id == "Two"][0]
     await h.start_at("Five", "test", {})
-    act_node_five_one = [x for x in h.active_nodes.values() if x.graph_node.id == "Five"][0]
+    act_node_five_one = [x for x in h.active_node_cache.values() if x.graph_node.id == "Five"][0]
 
     creation_duration = datetime.utcnow()-start_time
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPED
@@ -327,8 +328,8 @@ async def test_clean_past_next_time():
     assert act_node_two_one.status == ITEM_STATUS.CLOSING
     assert act_node_five_one.status == ITEM_STATUS.ACTIVE
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
-    assert id(act_node_two_one) in h.active_nodes
-    assert id(act_node_five_one) in h.active_nodes
+    assert id(act_node_two_one) in h.active_node_cache
+    assert id(act_node_five_one) in h.active_node_cache
     assert act_node_five_one.handler is h
     assert act_node_two_one.handler is h
     first_cleaning_task = h.cleaning_task
@@ -362,12 +363,12 @@ async def test_clean_list_overlap():
     start_time = datetime.utcnow()
 
     await h.start_at("Two", "test", {})
-    act_node_two_one = [x for x in h.active_nodes.values() if x.graph_node.id == "Two"][0]
+    act_node_two_one = [x for x in h.active_node_cache.values() if x.graph_node.id == "Two"][0]
     await h.start_at("Two", "test", {})
-    act_node_two_two = [x for x in h.active_nodes.values() if x.graph_node.id == "Two" and x is not act_node_two_one][0]
+    act_node_two_two = [x for x in h.active_node_cache.values() if x.graph_node.id == "Two" and x is not act_node_two_one][0]
     assert id(act_node_two_one) != id(act_node_two_two)
     await h.start_at("Five", "test", {})
-    act_node_five_one = [x for x in h.active_nodes.values() if x.graph_node.id == "Five"][0]
+    act_node_five_one = [x for x in h.active_node_cache.values() if x.graph_node.id == "Five"][0]
 
     creation_duration = datetime.utcnow()-start_time
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPED
@@ -379,8 +380,8 @@ async def test_clean_list_overlap():
     assert act_node_two_two.status == ITEM_STATUS.ACTIVE
     assert act_node_five_one.status == ITEM_STATUS.ACTIVE
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
-    assert id(act_node_two_one) in h.active_nodes
-    assert id(act_node_five_one) in h.active_nodes
+    assert id(act_node_two_one) in h.active_node_cache
+    assert id(act_node_five_one) in h.active_node_cache
     assert act_node_five_one.handler is h
     assert act_node_two_one.handler is h
     first_cleaning_task = h.cleaning_task
@@ -390,7 +391,7 @@ async def test_clean_list_overlap():
     assert act_node_two_two.status == ITEM_STATUS.ACTIVE
     assert act_node_five_one.status == ITEM_STATUS.ACTIVE
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
-    assert len(h.active_nodes) == 3
+    assert len(h.active_node_cache) == 3
     await asyncio.sleep(1)
     # cleaning finished prev node, starting task again cause going over
     # node five takes 2 seconds to closed, two takes four
@@ -404,15 +405,15 @@ async def test_clean_list_overlap():
     assert act_node_five_one.status == ITEM_STATUS.CLOSING
     assert act_node_two_two.status == ITEM_STATUS.CLOSING
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
-    assert len(h.active_nodes) == 2
+    assert len(h.active_node_cache) == 2
     await asyncio.sleep(2)
     # five finished cleaning, two still going.
     assert act_node_five_one.status == ITEM_STATUS.CLOSED
     assert act_node_two_two.status == ITEM_STATUS.CLOSING
     assert not first_cleaning_task.done()
-    assert len(h.active_nodes) == 1
+    assert len(h.active_node_cache) == 1
     assert h.cleaning_status["state"] == CLEANING_STATE.PAUSED
     await asyncio.sleep(2)
     assert act_node_two_two.status == ITEM_STATUS.CLOSED
     assert first_cleaning_task.done()
-    assert len(h.active_nodes) == 0
+    assert len(h.active_node_cache) == 0

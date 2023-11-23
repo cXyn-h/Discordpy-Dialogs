@@ -25,6 +25,9 @@ from jsonschema import validate, ValidationError
 # type annotations
 import src.DialogNodes.BaseType as BaseType
 
+import src.utils.Cache as Cache
+import src.DialogNodes.CacheNodeIndex as NodeIndex
+
 dialog_logger = logging.getLogger('Dev-Handler-Reporting')
 logHelper.use_default_setup(dialog_logger)
 dialog_logger.setLevel(logging.INFO)
@@ -54,21 +57,22 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: during transition order is to section session which closes node which has only one set way to close every time then does transition callbacks.
 #       This causes a flickering of buttons on discord menu message. Can I get that to not happen somehow? Can i get more info to close node so it can pass it to callbacks about why it's called?
 #       tho at least close_node knowing why it was calle would be good for debugging
+#TODO: might need add to async handle events later thing instead of awaitng notify
 
 #NOTE: each active node will get a reference to handler. Be careful what callbacks are added as they can mess around with handler itself
 
 class DialogHandler():
     def __init__(self, nodes:"dict[str, BaseType.BaseGraphNode]"=None, functions=None, settings = None, **kwargs) -> None:
+        dialog_logger.debug(f"dialog handler being initialized, id is <{id(self)}>")
         self.graph_nodes:dict[str, BaseType.BaseGraphNode] = nodes if nodes is not None else {}
         '''dict of nodes that represent graph this handler controls. other handlers linking to same list is ok and on dev to handle.'''
         self.functions = functions if functions is not None else {}
         '''dict of functions this handler is allowed to call. other handlers linking to same list is ok and on dev to handle.'''
 
-        self.active_nodes:dict[int,BaseType.BaseNode]={}
-        '''dictionary of active nodes that this handler is in charge of events and advancing. is mapping of unique id to node object'''
-        self.event_forwarding={}
+        self.active_node_cache = Cache.Cache(input_secondary_indices=[NodeIndex.CacheNodeIndex("event_forwarding", "event")], defualt_get_copy_rule=Cache.COPY_RULES.SHALLOW)
+        '''store for all active nodes this handler is in charge of handling events on. is mapping of unique id to node object'''
 
-        self.sessions:dict[int,SessionData.SessionData] = {}
+        self.sessions:dict[int, SessionData.SessionData] = {}
         #TODO: not relly using the session finding dict
         self.session_finding = {}
 
@@ -83,11 +87,12 @@ class DialogHandler():
 
         self.register_module(BaseFuncs)
 
+        # passed in as extra settings
         for key, option in kwargs.items():
             if hasattr(self, key):
                 raise Exception(f"trying to add extra attribute {key} but conflicts with existing attribute")
             setattr(self, key, option)
-    
+
     '''################################################################################################
     #
     #                                   SETUP FUNCTIONS SECTION
@@ -100,15 +105,18 @@ class DialogHandler():
         #TODO: second pass ok and debug running
         self.graph_nodes=nodeParser.parse_files(*file_names, existing_nodes={})
 
-    def add_nodes(self, node_list:"dict[int, BaseType.BaseGraphNode]" = {}):
+    def add_nodes(self, node_list:"dict[str, BaseType.BaseGraphNode]"={}, overwrites_ok=False):
         '''add all nodes in list into handler. gives a warning on duplicates
          dev note: assumed handler is now responsible for the objects passed in'''
         #TODO: second pass ok and debug running
         for node in node_list.values():
             if node.id in self.graph_nodes:
-                # possible exception, want to have setting for whether or not it gets thrown
-                execution_reporting.warning(f"tried adding <{node.id}>, but is duplicate. ignoring it.")
-                continue
+                if overwrites_ok:
+                    self.graph_nodes[node.id] = node
+                else:
+                    # possible exception, want to have setting for whether or not it gets thrown
+                    execution_reporting.warning(f"tried adding <{node.id}>, but is duplicate. ignoring it.")
+                    continue
             else:
                 self.graph_nodes[node.id] = node
     
@@ -186,17 +194,29 @@ class DialogHandler():
     ################################################################################################'''
 
     def register_function(self, func, override_settings={}):
+        '''register a function as allowed to use by this handler. Can override some of the function's default settings
+        
+        Parameters
+        ---
+        * func - `callable`
+            function that you want handler to be able to call. Must have fields attached that hold configuration settings for how function works in handler. see callbackUtils for settings
+        * override_settings -  `dict[str, Any]`
+            dict holding setting name to settings this handler should override function's default ones with. currently only looks for 'allowed_sections' and 'cb_key'
+            
+        Return
+        ---
+        boolean for if function was successfully registered'''
         permitted_purposes = func.allowed_sections
         if "allowed_sections" in override_settings:
             permitted_purposes = override_settings["allowed_sections"]
-        
+
         if permitted_purposes is None or len(permitted_purposes) < 1:
             execution_reporting.warning(f"dialog handler tried registering a function <{func.__name__}> that does not have any permitted sections")
             return False
         if func == self.register_function:
             execution_reporting.warning("dialog handler tried registering own registration function, dropping for security reasions")
             return False
-        
+
         cb_key = func.cb_key
         if "cb_key" in override_settings:
             execution_reporting.warning(f"doing manual override to register function with key <{override_settings['cb_key']}> instead of usual <{cb_key}>")
@@ -207,18 +227,34 @@ class DialogHandler():
             raise Exception(f"trying to register function <{func.__name__}> with key <{cb_key}> but key already registered. " +\
                                         f"If they are different fuctions, can change key to register by. "+ \
                                         "be aware yaml has to match the key registered with")
-        
-        dialog_logger.debug(f"registered callback <{func}> with key <{cb_key}> for purposes: <{permitted_purposes}>")
+
+        dialog_logger.debug(f"dialog handler id'd {id(self)} registered callback <{func}> with key <{cb_key}> {'same as default' if cb_key == func.cb_key else 'overridden'} for purposes: " +\
+                            f"<{[purpose.name for purpose in permitted_purposes]}> {'same as default' if permitted_purposes == func.allowed_sections else 'overridden'}")
         #TODO: this needs upgrading if doing qualified names
-        self.functions[cb_key]= {"ref":func, "permitted_purposes":permitted_purposes}
+        self.functions[cb_key]= {"ref": func, "permitted_purposes": permitted_purposes}
         return True
-    
+
     def register_functions(self, function_overrides):
+        '''registers a group of functions. 
+        
+        Parameters
+        ---
+        * function_overrides - `dict[callable, dict[str, Any]]
+            mapping of the function to any override settings to register that function with
+            
+        Return
+        ---
+        list of functions that were added'''
+        functions_registered = []
         for func, overrides in function_overrides.items():
-            self.register_function(func, overrides)
-    
+            result = self.register_function(func, overrides)
+            if result:
+                functions_registered.append(func)
+        return functions_registered
+
     def register_module(self, module):
-        self.register_functions(module.dialog_func_info)
+        '''registers function from module. module must have a variable called "dialog_func_info" that holds mapping of functions to overrides, and only those funcitons from module are registered'''
+        return self.register_functions(module.dialog_func_info)
 
     def function_is_permitted(self, func_name:str, section:POSSIBLE_PURPOSES, escalate_errors=False):
         '''if function is registered in handler and is permitted to run in the given section of handling and transitioning
@@ -246,7 +282,7 @@ class DialogHandler():
 
     async def start_at(self, node_id:str, event_key:str, event):
         '''start the graph execution at the given node with given event. checks if node exists and operation is allowed.'''
-        execution_reporting.info(f"starting process to start at node <{node_id}> with event <{event_key}> event deets: id <{id(event)}> type <{type(event)}>")
+        execution_reporting.info(f"dialog handler id'd <{id(self)}> starting process to start at node <{node_id}> with event <{event_key}> event deets: id <{id(event)}> type <{type(event)}> <{event}>")
         dialog_logger.debug(f"more deets for event at start at function <{event.content if hasattr(event, 'content') else 'content N/A'}>")
         if node_id not in self.graph_nodes:
             execution_reporting.warn(f"cannot start at <{node_id}>, not valid node")
@@ -259,22 +295,21 @@ class DialogHandler():
         # process session before node since the activation process binds session and currently don't have a neat written out process to bind new session
         session:typing.Union[SessionData.SessionData, None] = None
         if graph_node.starts_with_session(event_key):
-            dialog_logger.info(f"start at found node starts with a session")
             session = SessionData.SessionData()
+            dialog_logger.info(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{event_key}> id <{id(event)}> start at found node starts with a session, created it. id: <{id(session)}>")
         
         # get active node, design is callbacks assume have an active node to act on, allowing reusing those for start section (and reducing functions
         #   to maintain/store) means want an active node before processing callbacks
         active_node:BaseType.BaseNode = graph_node.activate_node(session)
         # some callbacks may depend on this assignment
         active_node.assign_to_handler(self)
-        dialog_logger.debug(f"starting session setup process to start <{node_id}> with event key <{event_key}> id'd <{id(event)}> oject type <{type(event)}>")
+        dialog_logger.debug(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{event_key}> id <{id(event)}> oject type <{type(event)}> has active node now <{id(active_node)}>, running callbacks")
         # some filters may want to depend on session data, which usually gets chance to setup on transition. Startup doesn't get any other chance
         #   than running some callbacks before filters
         await self.run_event_callbacks_on_node(active_node, event_key, event, version="start")
-        dialog_logger.debug(f"starting custom filter process to start <{node_id}> with event key <{event_key}> id'd <{id(event)}> oject type <{type(event)}>")
+        dialog_logger.debug(f"dialog handler id'd <{id(self)}> node <{id(active_node)}><{node_id}> with event <{event_key}> id <{id(event)}> oject type <{type(event)}> starting custom filter process")
         start_filters_result = self.run_event_filters_on_node(active_node, event_key, event, start_version=True)
         if start_filters_result:
-            dialog_logger.info(f"starting node <{node_id}> with event key <{event_key}> id'd <{id(event)}>")
             await self.track_active_node(active_node, event)
             execution_reporting.info(f"started active version of <{node_id}>, unique id is <{id(active_node)}>")
             if session is not None:
@@ -298,7 +333,7 @@ class DialogHandler():
         # don't use gather here, think it batches it so all nodes responding to event have to pass callbacks before any one of them go on to transitions
         # each node is mostly independent of others for each event and don't want them to wait for another node to finish
         notify_results = await asyncio.gather(*[self.run_event_on_node(node, event_key, event) for node in waiting_nodes])
-        dialog_logger.debug(f"results returned to notify method are <{notify_results}>")
+        dialog_logger.debug(f"handler id'd <{id(self)}> results returned to notify method are <{notify_results}>")
 
     '''################################################################################################
     #
@@ -308,7 +343,7 @@ class DialogHandler():
 
     async def run_event_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
         '''processes event happening on the given node'''
-        execution_reporting.debug(f"running event type <{event_key}> on node <{id(active_node)}><{active_node.graph_node.id}>")
+        execution_reporting.debug(f"handler id'd <{id(self)}> running event <{id(event)}><{event_key}><{type(event)}> on node <{id(active_node)}><{active_node.graph_node.id}>")
         debugging_phase = "begin"
         # try: #try catch around whole event running, got tired of it being hard to trace Exceptions so removed
         debugging_phase = "filtering"
@@ -349,7 +384,7 @@ class DialogHandler():
     def run_event_filters_on_node(self, active_node:BaseType.BaseNode, event_key:str, event, start_version=False):
         '''runs all custom filter callbacks for either starting at node or event for the given node and event pair. Filters are all syncronous callbacks.
         Catches and logs all errors from trying to run functions, stops going through list immediately'''
-        dialog_logger.debug(f"run event filters. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, type of event <{type(event)}> filters: <{active_node.graph_node.get_event_filters(event_key)}>")
+        dialog_logger.debug(f"handler id'd <{id(self)}> running event filters. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, type of event <{type(event)}> filters: <{active_node.graph_node.get_event_filters(event_key)}>")
         
         #custom event types designed to have extra addon filters, still being fleshed out as of 3.6.0
         if hasattr(event, "get_event_filters") and callable(event.get_event_filters):
@@ -503,16 +538,12 @@ class DialogHandler():
         adds node to handler's list of active nodes its currently is waiting on, does node actions for entering node, adds info about what events node
         is waiting for'''
         #TODO: fine tune id for active nodes
-        dialog_logger.info(f"adding node <{id(active_node)}><{active_node.graph_node.id}> to internal tracking")
+        dialog_logger.info(f"dialog handler id'd <{id(self)}> adding node <{id(active_node)}><{active_node.graph_node.id}> to internal tracking and running node callbacks")
         active_node.assign_to_handler(self)
 
-        await self.action_list_runner(active_node,event, active_node.graph_node.get_callbacks(), POSSIBLE_PURPOSES.ACTION)
-
-        self.active_nodes[id(active_node)] = active_node
-        for listed_event in active_node.graph_node.get_events().keys():
-            if listed_event not in self.event_forwarding:
-                self.event_forwarding[listed_event] = set()
-            self.event_forwarding[listed_event].add(active_node)
+        await self.action_list_runner(active_node, event, active_node.graph_node.get_callbacks(), POSSIBLE_PURPOSES.ACTION)
+        
+        self.active_node_cache.add(id(active_node), active_node, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
         self.notify_soonest_cleaning(active_node.timeout)
 
         #not adding register session cause most likely passing in new node every time, but not gauranteed unique session every new node. (even though currently that's technically not an issue)
@@ -552,15 +583,16 @@ class DialogHandler():
         #     if session_void:
         #         await self.close_session(active_node.session)
         dialog_logger.info(f"finished custom callbacks closing <{id(active_node)}><{active_node.graph_node.id}>, clearing node from internal trackers")
-        printing_active = {x: node.graph_node.id for x, node in self.active_nodes.items()}
+        printing_active = {x: node.graph_node.id for x, node in self.active_node_cache.items()}
         dialog_logger.debug(f"current state is active nodes are <{printing_active}>")
-        printing_forwarding = {event:[str(id(x))+' '+x.graph_node.id for x in nodes] for event,nodes in self.event_forwarding.items()}
+        printing_forwarding = {event:[str(x)+' '+self.active_node_cache.get(x)[0].graph_node.id for x in nodes] for event,nodes in self.active_node_cache.items(index_name="event_forwarding")}
         dialog_logger.debug(f"current state is event forwarding <{printing_forwarding}>")
-        if id(active_node) in self.active_nodes:
-            del self.active_nodes[id(active_node)]
-        for event in active_node.graph_node.get_events().keys():
-            if event is not None and event in self.event_forwarding:
-                self.event_forwarding[event].remove(active_node)
+
+        self.active_node_cache.delete(id(active_node))
+        printing_active = {x: node.graph_node.id for x, node in self.active_node_cache.items()}
+        dialog_logger.debug(f"after remove state is active nodes are <{printing_active}>")
+        printing_forwarding = {event:[str(x)+' '+self.active_node_cache.get(x)[0].graph_node.id for x in nodes] for event,nodes in self.active_node_cache.items(index_name="event_forwarding")}
+        dialog_logger.debug(f"after remove state is event forwarding <{printing_forwarding}>")
 
     def register_session(self, session:SessionData.SessionData):
         '''adds the given session info to handler's internal tracking for sessions'''
@@ -601,41 +633,41 @@ class DialogHandler():
                 await self.run_func_async(key, purpose, active_node, event, goal_node=goal_node, values=value)
 
     def filter_list_runner(self, active_node:BaseType.BaseNode, event, filter_list, purpose:POSSIBLE_PURPOSES, goal_node=None, operator="and"):
-            for filter in filter_list:
-                # dialog_logger.debug(f"testing recursive helper, at filter {filter} in list for node <{id(active_node)}><{active_node.graph_node.id}>")
-                if isinstance(filter, str):
-                    # filter_run_result = run_filter(handler, filter, active_node, event, None)
-                    filter_run_result = self.run_func(filter, purpose, active_node, event, goal_node=goal_node)
+        '''helper for running a section of filter callbacks. handles nested lists and can apply and/or logic to results from running each function.'''
+        for filter in filter_list:
+            # dialog_logger.debug(f"testing recursive helper, at filter {filter} in list for node <{id(active_node)}><{active_node.graph_node.id}>")
+            if isinstance(filter, str):
+                filter_run_result = self.run_func(filter, purpose, active_node, event, goal_node=goal_node)
+            else:
+                # is a dict representing function call with arguments or nested operator, should only have one key
+                key = list(filter.keys())[0]
+                value = filter[key]
+                if key in ["and", "or"]:
+                    filter_run_result = self.filter_list_runner(active_node, event, value, purpose, goal_node, operator=key)
                 else:
-                    # is a dict representing function call with arguments or nested operator, should only have one key
-                    key = list(filter.keys())[0]
-                    value = filter[key]
-                    if key in ["and", "or"]:
-                        filter_run_result = self.filter_list_runner(active_node, event, value, purpose, goal_node, operator=key)
-                    else:
-                        # argument in vlaue is expected to be one object. a list, a dict, a string etc
-                        # filter_run_result = run_filter(handler, key, active_node, event, value)
-                        filter_run_result = self.run_func(key, purpose, active_node, event, goal_node=goal_node, values=value)
-                # early break because not possible to change result with rest of list
-                if operator == "and" and not filter_run_result:
-                    # dialog_logger.debug(f"at filter {filter} in list for node <{id(active_node)}><{active_node.graph_node.id}>, returning False")
-                    return False
-                if operator == "or" and filter_run_result:
-                    # dialog_logger.debug(f"at filter {filter} in list for node <{id(active_node)}><{active_node.graph_node.id}>, returning True")
-                    return True
-            # end of for loop, means faild to find early break point
-            if operator == "and":
-                # dialog_logger.debug(f"<{id(active_node)}><{active_node.graph_node.id}> got through sub?list, returning True")
-                return True
-            if operator == "or":
-                # dialog_logger.debug(f"<{id(active_node)}><{active_node.graph_node.id}> got through sub?list, returning False")
+                    # argument in vlaue is expected to be one object. a list, a dict, a string etc
+                    filter_run_result = self.run_func(key, purpose, active_node, event, goal_node=goal_node, values=value)
+            # early break because not possible to change result with rest of list
+            if operator == "and" and not filter_run_result:
+                # dialog_logger.debug(f"at filter {filter} in list for node <{id(active_node)}><{active_node.graph_node.id}>, returning False")
                 return False
+            if operator == "or" and filter_run_result:
+                # dialog_logger.debug(f"at filter {filter} in list for node <{id(active_node)}><{active_node.graph_node.id}>, returning True")
+                return True
+        # end of for loop, means faild to find early break point
+        if operator == "and":
+            # dialog_logger.debug(f"<{id(active_node)}><{active_node.graph_node.id}> got through sub?list, returning True")
+            return True
+        if operator == "or":
+            # dialog_logger.debug(f"<{id(active_node)}><{active_node.graph_node.id}> got through sub?list, returning False")
+            return False
 
     def format_parameters(self, func_name:str, purpose:POSSIBLE_PURPOSES, active_node:BaseType.BaseNode, event, goal_node:typing.Union[BaseType.BaseNode, str] = None, values = None):
         '''
         Takes information that is meant to be passed to custom filter/callback functions and gets the parameters in the right order to be passed.
-        parameters will be passed in this order: the active node instance, the event that happened to node, the next node name if transition filter or active
-        next node if transition callback otherwise nothing here, and then if it exists any extra arguments to the function
+        parameters will be passed in this order: the active node instance, the event that happened to node, and next two are situational.
+        if function cal be called in transition section, generally the order is next node then any extra arguments, unless function requires extra arguments but can be called in transition or not,
+        then last two are swapped.
 
         PreReq
         ---
@@ -661,6 +693,7 @@ class DialogHandler():
                 args_list.append(goal_node)
             else:
                 args_list.append(None)
+            dialog_logger.debug(f"Dialog handler id'd <{id(self)}> ordering parameters for running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>. order is a e v g. details: {args_list}")
             return args_list
         
         # cross_transition and either optional or None
@@ -686,20 +719,21 @@ class DialogHandler():
         elif values is not None:
             execution_reporting.warning(f"calling {func_name}, have extra value for function parameters, discarding")
             
-        # dialog_logger.debug(f"sorted args list is: <{args_list}>")
+        dialog_logger.debug(f"Dialog handler id'd <{id(self)}> odering parameters for running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>. order is a e g? v?. details: {args_list}")
         return args_list
 
     #NOTE: keep this function in sync with synchronous version
     async def run_func_async(self, func_name:str, purpose:POSSIBLE_PURPOSES, active_node:BaseType.BaseNode, event, goal_node:typing.Union[BaseType.BaseNode, str] = None, values= None):
-        dialog_logger.debug(f"starting running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}>")
+        '''helper for running a dialog callback that could be async. awaits result if asynchronous. func_name and purpose is for checking information on formatting, rest are values that dialog callbacks need'''
         if not self.function_is_permitted(func_name, purpose):
+            dialog_logger.debug(f"Dialog handler id'd <{id(self)}> tried running async function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>, not allowed.")
             if purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
-                # filter functions, wether transtion or not, expect bool returns
+                # filter functions, wether transtion or not, expect bool returns. assume not allowed (function not listed in handler, or running for wrong purpose) smeans failed filter
                 return False
             else:
                 return None
         func_ref = self.functions[func_name]["ref"]
-        dialog_logger.debug(f"runn func async found function ref <{func_ref}>")
+        dialog_logger.debug(f"Dialog handler id'd <{id(self)}> starting running async function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>")
         if inspect.iscoroutinefunction(func_ref):
             return await func_ref(*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
         return func_ref(*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
@@ -707,13 +741,17 @@ class DialogHandler():
 
     #NOTE: keep this function in sync with asynchronous version
     def run_func(self, func_name:str, purpose:POSSIBLE_PURPOSES, active_node:BaseType.BaseNode, event, goal_node:typing.Union[BaseType.BaseNode, str] = None, values= None):
-        dialog_logger.debug(f"starting running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}>")
+        '''helper for running a dialog callback. func_name and purpose is for checking information on formatting, rest are values that dialog callbacks need'''
         if not self.function_is_permitted(func_name, purpose):
+            dialog_logger.debug(f"Dialog handler id'd <{id(self)}> tried running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>, not allowed")
             if purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
+                # filter functions, wether transtion or not, expect bool returns. assume not allowed (function not listed in handler, or running for wrong purpose) means failed filter
                 return False
             else:
                 return None
-        return self.functions[func_name]["ref"](*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
+        dialog_logger.debug(f"Dialog handler id'd <{id(self)}> starting running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>")
+        func_ref = self.functions[func_name]["ref"]
+        return func_ref(*self.format_parameters(func_name, purpose, active_node, event, goal_node, copy.deepcopy(values)))
     
     '''################################################################################################
     #
@@ -723,10 +761,7 @@ class DialogHandler():
 
     def get_waiting_nodes(self, event_key):
         '''gets list of active nodes waiting for certain event from handler'''
-        # dev status: used, can be useful small function
-        if event_key in self.event_forwarding:
-            return self.event_forwarding[event_key]
-        return set()
+        return self.active_node_cache.get(event_key, index_name="event_forwarding", default=set())
     
     '''################################################################################################
     #
@@ -775,7 +810,7 @@ class DialogHandler():
             # except asyncio.TimeoutError:
             #     # only possible to get here if already the main task
             #     cleaning_logger.debug(f"cleaning task {id(this_cleaning)} found clean is going long past next clean so starting clean before finishing.")
-            #     cleaning_logger.debug(f"same position as above, current active nodes: {[str(id(x))+' ' + x.graph_node.id for x in self.active_nodes.values()]}")
+            #     cleaning_logger.debug(f"same position as above, current active nodes: {[str(id(x))+' ' + x.graph_node.id for x in self.active_node_cache.values()]}")
             #     self.cleaning_status["state"] = CLEANING_STATE.STOPPING
             #     # starts a new task for cleaning, get the new timed out nodes asap
             #     self.start_cleaning()
@@ -841,7 +876,7 @@ class DialogHandler():
         # TODO: future performance upgrade: all this sorting can probably be skipped with a min-heap structure. at this point too lazy to implement
         next_soonest_timestamp = None
         timed_out_nodes = []
-        for node_key, active_node in self.active_nodes.items():
+        for node_key, active_node in self.active_node_cache.items():
             # every node will have timeout, it might be valid teime or a None
             if active_node.timeout is not None:
                 if active_node.timeout <= now:
@@ -873,10 +908,10 @@ class DialogHandler():
         for node in timed_out_nodes:
             try:
                 # assuming if not active, some clean task busy cleaning. hopefully doesn't mess anything up
-                if id(node) in self.active_nodes and node.is_active():
+                if id(node) in self.active_node_cache and node.is_active():
                     cleaning_logger.debug(f"starting to clear out node {id(node)} {node.graph_node.id}")
                     await self.close_node(node, timed_out=True)
-                    execution_reporting.warning(f"cleaning close node finished awaiting closing {id(node)}, sanity check is it stil inside {id(node) in self.active_nodes}")
+                    execution_reporting.warning(f"cleaning close node finished awaiting closing {id(node)}, sanity check is it stil inside {id(node) in self.active_node_cache}")
             except Exception as e:
                 execution_reporting.warning(f"close node failed on node {id(node)}, details: {type(e)}, {e}")
                 self.close_node(node, timed_out=True, emergency_remove=True)
@@ -884,7 +919,7 @@ class DialogHandler():
             if this_cleaning is not None and self.cleaning_task is this_cleaning and next_time is not None and next_time < datetime.utcnow() and\
                     self.cleaning_status["state"] not in [CLEANING_STATE.STOPPED, CLEANING_STATE.STOPPING]:
                 cleaning_logger.debug(f"cleaning task {id(this_cleaning)} found clean is going long past next clean so starting clean before finishing.")
-                cleaning_logger.debug(f"same position as above,  current active nodes: {[str(id(x))+' ' + x.graph_node.id for x in self.active_nodes.values()]}")
+                cleaning_logger.debug(f"same position as above,  current active nodes: {[str(id(x))+' ' + x.graph_node.id for x in self.active_node_cache.values()]}")
                 self.stop_cleaning()
                 # starts a new task for cleaning, get the new timed out nodes asap
                 self.start_cleaning()
@@ -930,7 +965,7 @@ class DialogHandler():
 
 
     def __del__(self):
-        if len(self.sessions) > 0 or len(self.active_nodes) > 0:
-            dialog_logger.warning(f"destrucor for handler. id'd <{id(self)}> sanity checking any memory leaks, may not be major thing \
-                                  sessions left: <{self.sessions}>, nodes left: <{self.active_nodes}>")
+        if len(self.sessions) > 0 or len(self.active_node_cache) > 0:
+            dialog_logger.warning(f"destrucor for handler. id'd <{id(self)}> sanity checking any memory leaks, may not be major thing" +\
+                                  f"sessions left: <{self.sessions}>, nodes left: <{self.active_node_cache.items()}>")
 

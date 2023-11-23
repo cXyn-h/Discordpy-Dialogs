@@ -1,7 +1,10 @@
 import src.DialogHandler as DialogHandler
+import src.DialogNodeParsing as NodeParser
+import src.DialogNodes.BaseType as BaseType
 import src.utils.callbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 import pytest
+import yaml
 
 @cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.FILTER])
 def f1(a, e):
@@ -72,89 +75,92 @@ def f9(a, e, v, g=None):
 
 dialog_func_info = {f1:{}, f2:{}, f3:{}, f4:{}, f5:{}, f6:{}, f7:{},  f8:{}, f9:{}}
 h = DialogHandler.DialogHandler()
-for func, overrides in dialog_func_info.items():
-    h.register_function(func, overrides)
+simple_node = '''
+id: One'''
+loaded_node = NodeParser.parse_node(yaml.safe_load(simple_node))
+active_node = BaseType.BaseNode(loaded_node)
+h.register_functions(dialog_func_info)
 
 def test_case1_order():
-    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e") == ["a","e"]
-    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", values="v") == ["a","e"]
-    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g") == ["a","e"]
-    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e"]
+    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e") == [active_node,"e"]
+    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", values="v") == [active_node,"e"]
+    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e"]
+    assert h.format_parameters("f1", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e"]
 
 def test_case2_order():
-    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e") == ["a","e",None]
-    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", values="v") == ["a","e","v"]
-    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g") == ["a","e", None]
-    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","v"]
+    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e") == [active_node,"e",None]
+    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", values="v") == [active_node,"e","v"]
+    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e", None]
+    assert h.format_parameters("f2", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","v"]
 
 def test_case3_order():
     with pytest.raises(Exception):
-        h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e")
-    assert h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", values="v") == ["a","e","v"]
+        h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e")
+    assert h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", values="v") == [active_node,"e","v"]
     with pytest.raises(Exception):
-        h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g")
-    assert h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","v"]
+        h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g")
+    assert h.format_parameters("f3", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","v"]
 
 def test_case4_order():
     with pytest.raises(Exception):
-        h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e")
+        h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e")
     with pytest.raises(Exception):
-        h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", values="v")
-    assert h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g") == ["a","e","g"]
-    assert h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","g"]
+        h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", values="v")
+    assert h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e","g"]
+    assert h.format_parameters("f4", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","g"]
 
 def test_case5_order():
     with pytest.raises(Exception):
-        h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e")
+        h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e")
     with pytest.raises(Exception):
-        h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", values="v")
-    assert h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g") == ["a","e","g", None]
-    assert h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","g","v"]
+        h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", values="v")
+    assert h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e","g", None]
+    assert h.format_parameters("f5", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","g","v"]
 
 def test_case6_order():
     with pytest.raises(Exception):
-        h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e")
+        h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e")
     with pytest.raises(Exception):
-        h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", values="v")
+        h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", values="v")
     with pytest.raises(Exception):
-        h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g")
-    assert h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","g","v"]
+        h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g")
+    assert h.format_parameters("f6", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","g","v"]
 
 def test_case7_order():
-    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e") == ["a","e", None]
-    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", values="v") == ["a","e", None]
-    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g") == ["a","e", None]
-    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e", None]
+    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e") == [active_node,"e", None]
+    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", values="v") == [active_node,"e", None]
+    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e", None]
+    assert h.format_parameters("f7", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e", None]
     with pytest.raises(Exception):
-        h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e")
+        h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e")
     with pytest.raises(Exception):
-        h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", values="v")
-    assert h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g") == ["a","e","g"]
-    assert h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","g"]
+        h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", values="v")
+    assert h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e","g"]
+    assert h.format_parameters("f7", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","g"]
 
 def test_case8_order():
-    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e") == ["a","e", None, None]
-    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", values="v") == ["a","e", None,"v"]
-    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g") == ["a","e", None, None]
-    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e", None,"v"]
+    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e") == [active_node,"e", None, None]
+    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", values="v") == [active_node,"e", None,"v"]
+    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e", None, None]
+    assert h.format_parameters("f8", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e", None,"v"]
     with pytest.raises(Exception):
-        assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e")
+        assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e")
     with pytest.raises(Exception):
-        assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", values="v")
-    assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g") == ["a","e","g", None]
-    assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","g","v"]
+        assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", values="v")
+    assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g") == [active_node,"e","g", None]
+    assert h.format_parameters("f8", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","g","v"]
 
 def test_case9_order():
     with pytest.raises(Exception):
-        assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e")
-    assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", values="v") == ["a","e","v", None]
+        assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e")
+    assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", values="v") == [active_node,"e","v", None]
     with pytest.raises(Exception):
-        assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g")
-    assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","v", None]
+        assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g")
+    assert h.format_parameters("f9", POSSIBLE_PURPOSES.ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","v", None]
     with pytest.raises(Exception):
-        assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e")
+        assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e")
     with pytest.raises(Exception):
-        assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", values="v")
+        assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", values="v")
     with pytest.raises(Exception):
-        assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g")
-    assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node="a", event="e", goal_node="g", values="v") == ["a","e","v","g"]
+        assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g")
+    assert h.format_parameters("f9", POSSIBLE_PURPOSES.TRANSITION_ACTION, active_node=active_node, event="e", goal_node="g", values="v") == [active_node,"e","v","g"]
