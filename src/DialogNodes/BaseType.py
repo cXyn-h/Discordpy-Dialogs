@@ -1,5 +1,6 @@
 #TODO: is adding values onto fields such as event filters feasible?
 #TODO: proofing against None values: what is values if you just list events flag and leave value blank, getters proofed against None, handler accesses these directly without getters so which ones might crash because of None
+#TODO: double check if inherited from parent class's set and update methods should be used (probably, but further down pipeline problem)
 from datetime import datetime, timedelta
 import typing
 import src.utils.SessionData as SessionData
@@ -33,7 +34,7 @@ patternProperties:
         type: "string"
         pattern: '[0-9]+\.[0-9]+\.[0-9]+'
 properties:
-    id: 
+    id:
         type: "string"
     type:
         type: "string"
@@ -125,6 +126,8 @@ required: ["id"]
     TYPE="Base"
 
     def validate_node(self):
+        #TODO: feels clunkly. reevaluate what does need to be validated here (probably at least a way to check if functions needed and nodes to go to are actually in handler)
+        #  (what about the rest of node definition? think it should have been validated on edits)
         unique_next_nodes = set()
         function_set_list = []
         if self.graph_start is not None:
@@ -155,34 +158,64 @@ required: ["id"]
         return unique_next_nodes, function_set_list
 
     def __init__(self, options:dict) -> None:
+        '''Instances hold specific settings for one graph node. 
+        
+        Init Parameters
+        ---
+        * options - `dict`
+            All options defined in the GraphNode class will be added as dot notation referencable fields on each GraphNode object.
+            this parameter is a ditionary option name to values for the fields of this object.
+            Makes sure all and only all fields listed in Graph node type's class are defined. values that are not primitives should be copied before passing in.
+            On missing values, tries to use defaults from class.DEFINITION, otherwise raises an exception. Ignores extras.
+        '''
+        #TODO: double check no errors with multi inheritence
+
+        # super class cache object setup
         super().__init__(id(self), timeout=-1)
-        for key, option in options.items():
-            setattr(self, key, option)
+        # keeping track of missing things
+        options_left = []
+        for field in self.__class__.get_node_fields():
+            field_name = field["name"]
+            if field_name in options:
+                setattr(self, field_name, options[field_name])
+            elif "default" in field:
+                setattr(self, field_name, copy.deepcopy(field["default"]))
+            else:
+                options_left.append(field_name)
+        
+        # assuming all options found from getting node fields are required, so no default and nothing specified in passed in definition means fail
+        if len(options_left) > 0:
+            raise Exception(f"node object of type {self.__class__.__name__} missing values for fields during init: {options_left}")
 
     def activate_node(self, session:typing.Union[None, SessionData.SessionData]=None) -> "BaseNode":
-        '''creates and sets up an active node based on this graph node'''
+        '''creates and returns an active Node of the GraphNode's type. if there's a passed in session object, ties the created active node to the session'''
         # node_ttl = min (self.TTL) if session is None else (min(self.TTL, session.time_left().total_seconds()) if self.TTL > 0 else session.time_left().total_seconds())
         return BaseNode(self, session, timeout_duration=timedelta(seconds=self.TTL))
     
     def can_start(self, event_key:str):
+        '''checks whether or not event of event_key is allowed to start at this node. Must have event's key listed within graph_start section to be allowed to start'''
         if self.graph_start is None:
             return False
         return event_key in self.graph_start
+        
+    def starts_with_session(self, event_key:str):
+        '''checks if the given event requires setting up a session when starting this node.'''
+        return self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("session_chaining" in self.graph_start[event_key])
     
+    def get_start_callbacks(self, event_key:str):
+        '''returns a list of function names needed for performing startup actions for the given event_key. startup actions are not required, so will return an empty list if none are listed'''
+        if self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("setup" in self.graph_start[event_key]):
+            #TODO: verify if can return a copy instead, should be copyable? also verify all these functions returning in stored format is ok or not
+            return self.graph_start[event_key]["setup"]
+        else:
+            return []
+
     def get_start_filters(self, event_key:str):
+        '''returns a list of function names needed for filtering starting with this event_key. Filters aren't required, and will return empty list if none are listed'''
         if self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("filters" in self.graph_start[event_key]):
             return self.graph_start[event_key]["filters"]
         else:
             return []
-        
-    def get_start_callbacks(self, event_key:str):
-        if self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("setup" in self.graph_start[event_key]):
-            return self.graph_start[event_key]["setup"]
-        else:
-            return []
-        
-    def starts_with_session(self, event_key:str):
-        return self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("session_chaining" in self.graph_start[event_key])
     
     def get_events(self):
         if self.events is None:
@@ -228,22 +261,33 @@ required: ["id"]
     
     @classmethod
     def get_node_fields(cls):
-        '''merges together the config and inherited config for what fields active nodes of this type should have and caches and returns it.
-        Child classes override parents' fields'''
+        '''method that finds all the fields that a GraphNode of this type should have. This is done by merging together inherited field definitions and this class's.
+        Child classes override parents' fields.
+        Result is a list of dictionaries of all fields and their settings.
+        Caches result in GraphNode class, and returns a separate copy of result'''
         # note, hasattr uses getattr which default also looks in parent classes, which sensibly also applies to class variables. don't use it for something that needs to be defined per class independent of parents'
         if "PARSED_DEFINITION" in vars(cls).keys() and cls.PARSED_DEFINITION is not None:
             # if there's a previous result of parsed definition cached, use that
             return cls.PARSED_DEFINITION
         # nothing cached, need to actually find definitions for this class
+        # grab inheritance order
         mro_list = cls.__mro__
         final_definitions = {}
+        # hoping any non-node classes in this mro list will not have this function
+        # first checks there is a parent class, if none there's no fields to inherit by default so just get this class's
+        # second check is for this method, assuming all nodes should have get_node_fields to resolve inherited fields so if not there not a node and no fields to inherit by default
         parent_definitions = mro_list[1].get_node_fields() if len(mro_list) > 1 and hasattr(mro_list[1], "get_node_fields") else {}
+        # convert the returned list into a dict that's being used for easy finding
         for option in parent_definitions:
             final_definitions[option["name"]] = copy.deepcopy(option)
 
+        # load self definitions on top
         self_modifications = yaml.safe_load(cls.DEFINITION)
         for option in self_modifications["options"]:
-            final_definitions[option["name"]] = option
+            if option["name"] in final_definitions:
+                final_definitions.update({option["name"]: option})
+            else:
+                final_definitions[option["name"]] = option
 
         cls.PARSED_DEFINITION = list(final_definitions.values())
         return list(final_definitions.values())
