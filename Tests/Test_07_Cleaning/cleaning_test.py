@@ -36,7 +36,7 @@ async def sleep(active_node, event, duration, occurance_tracker={}):
 @pytest.mark.asyncio
 async def test_clean_info_finds_existing_next():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list1.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list1.yml"])
 
     await h.start_at("One", "test", {})
     await h.start_at("Two", "test", {})
@@ -61,7 +61,7 @@ async def test_clean_info_no_actives_finds_next_is_none():
 @pytest.mark.asyncio
 async def test_clean_info_finds_timed_out_closing_node():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list1.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list1.yml"])
 
     await h.start_at("One", "test", {})
     act_node_one = [x for x in h.active_node_cache.values() if x.graph_node.id == "One"][0]
@@ -100,7 +100,7 @@ graph_start:
 @pytest.mark.asyncio
 async def test_start_cleaning_process():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
 
     await h.start_at("One", "test", {})
     await h.start_at("Two", "test", {})
@@ -116,7 +116,7 @@ async def test_start_cleaning_process():
 @pytest.mark.asyncio
 async def test_one_clean_is_right():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
 
     await h.start_at("One", "test", {})
     await h.start_at("Two", "test", {})
@@ -143,7 +143,7 @@ async def test_one_clean_is_right():
 @pytest.mark.asyncio
 async def test_stop_clean():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
 
     await h.start_at("One", "test", {})
     await h.start_at("Two", "test", {})
@@ -174,7 +174,7 @@ async def test_stop_clean():
 @pytest.mark.asyncio
 async def test_repeat_clean_starts_nodes():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
 
     start_time = datetime.utcnow()
 
@@ -239,7 +239,7 @@ async def test_repeat_clean_starts_empty():
 @pytest.mark.asyncio
 async def test_clean_should_never_run():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
 
     # lots of tests here using node One as the one that times out first clean.
     await h.start_at("One", "test", {})
@@ -261,7 +261,7 @@ async def test_clean_should_never_run():
 @pytest.mark.asyncio
 async def test_cleaning_unpauses():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
 
     start_time = datetime.utcnow()
 
@@ -282,7 +282,7 @@ async def test_cleaning_unpauses():
 @pytest.mark.asyncio
 async def test_two_task_interference():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list2.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list2.yml"])
     await h.start_at("One", "test", {})
     await h.start_at("Two", "test", {})
 
@@ -308,7 +308,7 @@ async def test_two_task_interference():
 async def test_clean_past_next_time():
     '''testing cleaning going long over time to do next clean. without outside interference'''
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list3.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list3.yml"])
 
     h.register_function(sleep)
 
@@ -356,7 +356,7 @@ async def test_clean_past_next_time():
 @pytest.mark.asyncio
 async def test_clean_list_overlap():
     h = DialogHandler.DialogHandler()
-    h.setup_from_files(["Tests/TestCLeaning/node_list3.yml"])
+    h.setup_from_files(["Tests/Test_07_Cleaning/node_list3.yml"])
 
     h.register_function(sleep)
 

@@ -1,14 +1,11 @@
 import src.DialogNodes.BaseType as BaseType
 
-# INVALID because definition missing options key
+# INVALID because can't find a Node for the Type. This time because name mismatch
 
 class TestGraphNode(BaseType.BaseGraphNode):
     TYPE = "Test"
-    DEFINITION='''
-key1: sdfsd
-key2: []
-key3:
-  a: A'''
+    FIELDS='''
+options: []'''
     SCHEMA = '''
 type: object
 properties:
@@ -33,5 +30,5 @@ properties:
     # VERSION="1.0.0"
     pass
 
-class TestNode(BaseType.BaseNode):
+class WRONGTestNode(BaseType.BaseNode):
     pass

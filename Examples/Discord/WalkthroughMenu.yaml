@@ -1,7 +1,7 @@
 nodes:
   - id: "welcome"
     type: Base
-    v: "3.6.0"
+    version: "3.6.0"
     graph_start:
       message_command:
       slash_command:

@@ -1,11 +1,11 @@
 import src.DialogNodes.BaseType as BaseType
 
-# INVALID because root of definition wrong form
+# INVALID because Node is not a class
 
 class TestGraphNode(BaseType.BaseGraphNode):
     TYPE = "Test"
-    DEFINITION='''
-WRONGdefinition'''
+    FIELDS='''
+options: []'''
     SCHEMA = '''
 type: object
 properties:
@@ -30,5 +30,4 @@ properties:
     # VERSION="1.0.0"
     pass
 
-class TestNode(BaseType.BaseNode):
-    pass
+TestNode = {}

@@ -4,9 +4,12 @@ import src.DialogNodes.BaseType as BaseType
 
 class ValidTestGraphNode(BaseType.BaseGraphNode):
     TYPE = "ValidTest"
-    DEFINITION='''
+    FIELDS='''
 options:
-  - name: asdf'''
+  - name: asdf
+    default: false
+  - name: asdf
+    default: []'''
     SCHEMA = '''
 type: object
 properties:

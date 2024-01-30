@@ -1,0 +1,9 @@
+nodes:
+  - id: One
+    TTL: 30
+    type: Base
+  - id: Two
+    type: ValidTest
+    TTL: 40
+    version: "1.0.0"
+    testing: Tester

@@ -13,7 +13,7 @@ import src.utils.Cache as Cache
 class BaseGraphNode(Cache.AbstractCacheEntry):
     VERSION = "3.6.0"
     # this specifies what fields will be copied into graph node
-    DEFINITION='''
+    FIELDS='''
 options:
   - name: id
   - name: graph_start
@@ -29,11 +29,10 @@ options:
 '''
     SCHEMA='''
 type: object
-patternProperties:
-    "^v(ersion)?$":
+properties:
+    version: 
         type: "string"
         pattern: '[0-9]+\.[0-9]+\.[0-9]+'
-properties:
     id:
         type: "string"
     type:
@@ -166,12 +165,11 @@ required: ["id"]
             All options defined in the GraphNode class will be added as dot notation referencable fields on each GraphNode object.
             this parameter is a ditionary option name to values for the fields of this object.
             Makes sure all and only all fields listed in Graph node type's class are defined. values that are not primitives should be copied before passing in.
-            On missing values, tries to use defaults from class.DEFINITION, otherwise raises an exception. Ignores extras.
+            On missing values, tries to use defaults from class.FIELDS, otherwise raises an exception. Ignores extras.
         '''
-        #TODO: double check no errors with multi inheritence
-
         # super class cache object setup
         super().__init__(id(self), timeout=-1)
+
         # keeping track of missing things
         options_left = []
         for field in self.__class__.get_node_fields():
@@ -265,31 +263,46 @@ required: ["id"]
         Child classes override parents' fields.
         Result is a list of dictionaries of all fields and their settings.
         Caches result in GraphNode class, and returns a separate copy of result'''
-        # note, hasattr uses getattr which default also looks in parent classes, which sensibly also applies to class variables. don't use it for something that needs to be defined per class independent of parents'
-        if "PARSED_DEFINITION" in vars(cls).keys() and cls.PARSED_DEFINITION is not None:
+        # note, hasattr uses getattr which default also looks in parent classes, which sensibly also applies to class variables.
+        #   don't use it for something that needs to be defined per class independent of parents'
+        if "PARSED_FIELDS" in vars(cls).keys() and cls.PARSED_FIELDS is not None:
             # if there's a previous result of parsed definition cached, use that
-            return cls.PARSED_DEFINITION
+            return copy.deepcopy(cls.PARSED_FIELDS)
+
         # nothing cached, need to actually find definitions for this class
-        # grab inheritance order
+        # grab inherited fields first
         mro_list = cls.__mro__
         final_definitions = {}
-        # hoping any non-node classes in this mro list will not have this function
-        # first checks there is a parent class, if none there's no fields to inherit by default so just get this class's
-        # second check is for this method, assuming all nodes should have get_node_fields to resolve inherited fields so if not there not a node and no fields to inherit by default
-        parent_definitions = mro_list[1].get_node_fields() if len(mro_list) > 1 and hasattr(mro_list[1], "get_node_fields") else {}
-        # convert the returned list into a dict that's being used for easy finding
-        for option in parent_definitions:
-            final_definitions[option["name"]] = copy.deepcopy(option)
+        # hoping any non-node classes in this mro list will not have get_node_fields function (not checking isinstance so duck typing can work)
+        if len(mro_list) > 1:
+            # if longer than one means there's inheritance and need to gather all fields inherited from nodes
+            # for loop takes off the zero-th element cause that is self
+            for parent in reversed(mro_list[1:]):
+                parent_definitions = parent.get_node_fields() if hasattr(parent, "get_node_fields") else {}
+                # convert the returned list into a dict that's being used for easy finding
+                for single_field in parent_definitions:
+                    final_definitions[single_field["name"]] = copy.deepcopy(single_field)
 
         # load self definitions on top
-        self_modifications = yaml.safe_load(cls.DEFINITION)
-        for option in self_modifications["options"]:
-            if option["name"] in final_definitions:
-                final_definitions.update({option["name"]: option})
+        self_modifications = yaml.safe_load(cls.FIELDS)
+        if self_modifications is None:
+            # this class doesn't have any fields to add, only base type cannot be allowed to do this
+            if cls.__name__ == BaseGraphNode.__name__:
+                raise Exception("Base type fields definition is critically malformed. whole system canot be used.")
+            cls.PARSED_FIELDS = list(final_definitions.values())
+            return list(final_definitions.values())
+        if not isinstance(self_modifications, dict) or "options" not in self_modifications or self_modifications["options"] is None:
+            raise Exception(f"node type <{cls.TYPE}> has badly formed fields. Must be either empty or have a list of fields in yaml format")
+        # this class does have fields to add
+        for single_field in self_modifications["options"]:
+            if "name" not in single_field:
+                raise Exception(f"node type <{cls.TYPE}> has malformed option: An option in definition is missing a name")
+            if single_field["name"] in final_definitions:
+                final_definitions.update({single_field["name"]: single_field})
             else:
-                final_definitions[option["name"]] = option
+                final_definitions[single_field["name"]] = single_field
 
-        cls.PARSED_DEFINITION = list(final_definitions.values())
+        cls.PARSED_FIELDS = list(final_definitions.values())
         return list(final_definitions.values())
     
     @classmethod
@@ -297,15 +310,128 @@ required: ["id"]
         #TODO: probably need something to merge schemas, this will treat the two as independent, and can't use child classes to override base schema
         if "PARSED_SCHEMA" in vars(cls).keys() and cls.PARSED_SCHEMA is not None:
             # if there's a previous result of parsed schema cached, use that
-            return cls.PARSED_SCHEMA
-        mro_list = cls.__mro__
-        final_schema = mro_list[1].get_node_schema() if len(mro_list) > 1 and hasattr(mro_list[1], "get_node_schema") else {"allOf": []}
+            return copy.deepcopy(cls.PARSED_SCHEMA)
 
+        mro_list = cls.__mro__
+        #TODO: this technically works for multi inheritance, but easily multiplies the length. maybe do something to find and merge duplicates later
+        final_schema = {"allOf": []}
+        # hoping any non-node classes in this mro list will not have get_node_schema function (not checking isinstance so duck typing can work)
+        if len(mro_list) > 1:
+            # if longer than one means there's inheritance and need to gather all schema details inherited from nodes
+            # for loop takes off the zero-th element cause that is self
+            for parent in reversed(mro_list[1:]):
+                parent_definitions = parent.get_node_schema() if hasattr(parent, "get_node_schema") else {"allOf": []}
+                for schema_fragment in parent_definitions["allOf"]:
+                    final_schema["allOf"].append(schema_fragment)
+
+        # load self schema on top
         self_schema = yaml.safe_load(cls.SCHEMA)
+        if self_schema is None:
+            # this class doesn't have any schema to add, only base type cannot be allowed to do this
+            if cls.__name__ == BaseGraphNode.__name__:
+                raise Exception("Base type schema is critically malformed. whole system canot be used.")
+            cls.PARSED_SCHEMA = final_schema
+            return copy.deepcopy(final_schema)
+        if not isinstance(self_schema, dict):
+            raise Exception(f"node type <{cls.TYPE}> seems to have badly formed schema.")
         final_schema["allOf"].append(self_schema)
         cls.PARSED_SCHEMA = final_schema
         return copy.deepcopy(final_schema)
+    
+    @classmethod
+    def get_version(cls):
+        return cls.VERSION
+    
+    @classmethod
+    def check_version_compatibility(cls, other_version):
+        result_warning_message = ""
+        def parse_version_string(version_string):
+            '''
+            Return
+            ---
+            Optional[tuple]
+            '''
+            first_dot=version_string.find(".")
+            if first_dot < 0:
+                return None
+            second_dot=version_string.find(".",first_dot+1)
+            if second_dot < 0:
+                return None
+            try:
+                version_tuple=(int(version_string[:first_dot]),int(version_string[first_dot+1:second_dot]), int(version_string[second_dot+1:]))
+            except:
+                return None
+            if version_tuple[0] < 0 or version_tuple[1] < 0 or version_tuple[2] < 0:
+                return None
+            return version_tuple
 
+        if not other_version:
+            other_version = cls.get_version()
+            result_warning_message += f"no version given, assuming most recent of '{other_version}'. might break if not compatible.\n"
+
+        other_version_values = parse_version_string(other_version)
+        this_version_values = parse_version_string(cls.get_version())
+
+        if this_version_values is None:
+            return False, "loaded node definition has badly formatted version, developer needs to fix.\n"
+        if other_version_values is None:
+            return False, "version given is badly formatted. must be three period separated whole numbers\n"
+
+        if other_version_values[0] != this_version_values[0]:
+            return False, f"loaded node definition cannot handle version given {other_version}"
+        if other_version_values[1] != this_version_values[1]:
+            return True, f"loaded node definition can handle version {other_version}, though it would be best to match." +\
+                ' node config seems lilke its on an older version, please be sure to update node config to match current loaded of '+cls.get_version() \
+                if other_version_values[1] < this_version_values[1] else ""
+        else:
+            return True, ""
+    
+    @classmethod
+    def compare_version(cls, other_version):
+        '''
+        compares the loaded definition's version to the given other version string.
+        
+        Return
+        ---
+        None if could not compare the versions, which can be because one of the version strings is invalid or not able to be conpared
+        the largest '''
+        def parse_version_string(version_string):
+            '''
+            Return
+            ---
+            Optional[tuple]
+            '''
+            first_dot=version_string.find(".")
+            if first_dot < 0:
+                return None
+            second_dot=version_string.find(".",first_dot+1)
+            if second_dot < 0:
+                return None
+            try:
+                version_tuple=(int(version_string[:first_dot]),int(version_string[first_dot+1:second_dot]), int(version_string[second_dot+1:]))
+            except:
+                return None
+            if version_tuple[0] < 0 or version_tuple[1] < 0 or version_tuple[2] < 0:
+                return None
+            return version_tuple
+    
+        this_version_values = parse_version_string(cls.VERSION)
+        other_version_values = parse_version_string(other_version)
+        if this_version_values is None or other_version_values is None: 
+            return None
+        difference = None
+        for i in range(len(this_version_values)):
+            if this_version_values[i] != other_version_values[i]:
+                difference = other_version_values[i] - this_version_values[i]
+                return difference
+        return difference
+    
+    @classmethod
+    def clear_caches(cls):
+        if "PARSED_FIELDS" in vars(cls).keys():
+            delattr(cls, "PARSED_FIELDS")
+        if "PARSED_SCHEMA" in vars(cls).keys():
+            delattr(cls, "PARSED_SCHEMA")
 
 class BaseNode(Cache.AbstractCacheEntry):
     DO_NOT_COPY_VARS = ["handler", "cache"]

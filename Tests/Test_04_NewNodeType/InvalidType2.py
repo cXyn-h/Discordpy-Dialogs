@@ -1,10 +1,12 @@
 import src.DialogNodes.BaseType as BaseType
 
-class ValidTestGraphNode(BaseType.BaseGraphNode):
-    TYPE = "ValidTest"
-    DEFINITION='''
-options: []'''
-    SCHEMA = '''
+# INVALID because GraphNode is not a class
+
+TestGraphNode = {
+    "TYPE": "Test",
+    "FIELDS":'''
+options: []''',
+    "SCHEMA": '''
 type: object
 properties:
     graph_start:
@@ -25,8 +27,7 @@ properties:
                                 type: ["string", "object"]
                       unevaluatedProperties: false
         unevaluatedProperties: false'''
-    # VERSION="1.0.0"
-    pass
+}
 
-class ValidTestNode(BaseType.BaseNode):
+class TestNode(BaseType.BaseNode):
     pass

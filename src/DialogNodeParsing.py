@@ -18,71 +18,73 @@ parsing_logger.setLevel(logging.INFO)
 
 #TODO: this allows globally, any instances of needing to limit to subsets? -ie would this need to be in a class
 ALLOWED_NODE_TYPES = {}
-'''dinctionary of node type name to node type module that the parser can handle. module should contain both GraphNode and active Node of the type'''
-NODE_DEFINITION_CACHE = {}
-'''deprecated temp store of parsed definition for node types, type must appear in ALOWED_NODE_TYPES, read in as string, cached as dict'''
-NODE_SCHEMA_CACHE = {}
-'''deprecated temp store of parsed schema for node types, type must appear in ALLOWED_NODE_TYPES, read in as string, cached as dict'''
+'''The global cache of what types of nodes the parser can handle. dinctionary of node type name to node type module.
+    that single module should contain both GraphNode and active Node of the type'''
 #~~~~~~~~~ FURTHER SETUP OF THESE ARE DONE AFTER DEFINING FUNCTIONS FOR HANDLING AND REGESTERING ~~~~~~~~~
 
-def register_node_type(type_module, type_name, re_register = False):
-    '''validates and registers a node type that the parser can use. Raises Exceptions for invalid node type
-    
+def find_node_classes(type_module):
+    '''
+    finds node types that have both classes defined within a module, not necessarily fully valid node type definition. 
+    note that while technically you can have more than one type's classes in a file,
+    its not recommended for organization sake. Module must have both GraphNode and active Node classes of a type defined to support the type.
+
     Parameters
     ---
     type_module - `module`
-        module that contains the Node classes for the type
-    type_name - `str`
-        name of the type, should match the TYPE in the GraphNode class
-    re-register - `bool`
-        boolean for whether or not it's ok to override if already registered. prints out warning if trying to re-register and this is false'''
-    parsing_logger.debug(f"trying to register a node under <{type_name}>")
-    validate_type(type_module, type_name)
-    graph_node_ref = getattr(type_module, type_name+"GraphNode")
+        module that contains the GraphNode and Node classes for the type
     
-    if graph_node_ref.TYPE in ALLOWED_NODE_TYPES and not re_register:
+    Return
+    ---
+    a list of types that hoave both classes defined within module. Those still may not be valid nodes'''
+    found_graph_node_types = []
+    found_node_types = []
+    for name, obj in inspect.getmembers(type_module):
+        if inspect.isclass(obj):
+            if name.endswith("GraphNode"):
+                found_graph_node_types.append(name[:name.find("GraphNode")])
+            elif name.endswith("Node"):
+                found_node_types.append(name[:name.find("Node")])
+
+    supported_types = []
+    # type considered supported if both GraphNode and active Node classes are present
+    for type in found_graph_node_types:
+        if type in found_node_types:
+            supported_types.append(type)
+    return supported_types
+
+def register_node_type(type_module, type_name:str, re_register=False, allowed_types:"dict[str,BaseType.BaseGraphNode]"=ALLOWED_NODE_TYPES):
+    '''validates and if passes validation registers the given node type so the parser can use it. Raises Exceptions for invalid node type
+
+    Parameters
+    ---
+    type_module - `module`
+        module that contains the GraphNode and Node classes for the type
+    type_name - `str`
+        name of the type, should match the TYPE in the GraphNode class and the name of the class
+    re-register - `bool`
+        boolean for whether or not it's ok to override if already registered. prints out warning if trying to re-register and this is false
+    allowed_types - `dict[str, module]`
+        dictonary of types that are already registered and allowed to use for parsing. uses global storage dictionary as default, otherwise can override
+        with local registries'''
+    parsing_logger.debug(f"trying to register a node under <{type_name}>")
+    graph_node_ref:BaseType.BaseGraphNode = getattr(type_module, type_name+"GraphNode")
+    # if not valid, it will error out and won't finish registering
+    validate_type(type_module, type_name)
+
+    if graph_node_ref.TYPE in allowed_types and not re_register:
         parsing_logger.warning(f"type <{graph_node_ref.TYPE}> already registered, and not allowed to re-register. skipping")
         return False
     else:
-        ALLOWED_NODE_TYPES[graph_node_ref.TYPE] = type_module
-        # if re-registering, probably a good idea to get rid of any potential stale data
-        if re_register and graph_node_ref.TYPE in NODE_DEFINITION_CACHE:
-            del NODE_DEFINITION_CACHE[graph_node_ref.TYPE]
-        if re_register and graph_node_ref.TYPE in NODE_SCHEMA_CACHE:
-            del NODE_SCHEMA_CACHE[graph_node_ref.TYPE]
-        parsing_logger.debug(f"node type <{graph_node_ref.TYPE}> registerd, full list now is <{ALLOWED_NODE_TYPES}>")
+        # if re-registering, likely should clear out caches. validate already does that so no need here
+        allowed_types[graph_node_ref.TYPE] = type_module
+        parsing_logger.debug(f"node type <{graph_node_ref.TYPE}> registerd, full list now is <{allowed_types}>")
         return True
 
-def parse_version_string(version_string):
-    '''takes version string and returns tuple of three numbers representing version number
-
-    Parameters
-    ----
-    version_string - `str`
-        string of of three ints separated by periods
-
-    Return
-    ---
-    tuple'''
-    first_dot=version_string.find(".")
-    if first_dot < 0:
-        raise Exception(f"{version_string} is invalid version, must have three period separated whole numbers")
-    second_dot=version_string.find(".",first_dot+1)
-    if second_dot < 0:
-        raise Exception(f"{version_string} is invalid version, must have three period separated whole numbers")
-    try:
-        version_tuple=(int(version_string[:first_dot]),int(version_string[first_dot+1:second_dot]), int(version_string[second_dot+1:]))
-    except:
-        raise Exception(f"{version_string} is invalid version, must have three period separated whole numbers")
-    if version_tuple[0] < 0 or version_tuple[1] < 0 or version_tuple[2] < 0:
-        raise Exception(f"{version_string} has negative values. not allowed")
-    return version_tuple
-
-def validate_type(type_module, type_name):
+def validate_type(type_module, type_name:str):
     '''validates node type is formatted correctly. module must have two classes named: [type]GraphNode and [type]Node where you replace [type] with
-    actual name of the type. GraphNode must have VERSION, DEFINITION, SCHEMA, TYPE fields. best to extend from BaseType. Raises Exception 
-    if type is not formatted correctly.
-    
+    actual name of the type. GraphNode must have TYPE field, and be able to fetch schema, fields and have a compatible version. 
+    best to extend from BaseType. Raises Exception if type is not formatted correctly.
+
     Parameters
     ---
     type_module - `module`
@@ -94,105 +96,91 @@ def validate_type(type_module, type_name):
         raise Exception(f"cannot find a <{type_name}GraphNode> class in node type <{type_name}> module.")
     if not hasattr(type_module, type_name+"Node") or not inspect.isclass(getattr(type_module, type_name+"Node")):
         raise Exception(f"cannot find a <{type_name}Node> class in node type <{type_name}> module.")
-    
+
     #TODO: validate duck typing: all needed methods are there? lots of methods though
-    
-    graph_node = getattr(type_module, type_name+"GraphNode")
+
+    graph_node:BaseType.BaseGraphNode = getattr(type_module, type_name+"GraphNode")
+    graph_node.clear_caches()
     if graph_node.TYPE != type_name:
         # this is an exception because GraphNode.TYPE will be used by yaml and code to know the type. Classes' names must have type in them
         # type_name is not saved, so if refilling schema caches later, it'll be harder to find classes from the GraphNode.TYPE
-        raise Exception(f"passed in node type <{type_name}> is different from recorded type in GraphNode <{graph_node.TYPE}>. " +\
+        raise Exception(f"passed in node type <{type_name}> is different from recorded type in GraphNode <{graph_node.TYPE}>. " + \
                         f"Needs to be the same so system can find node info reliably.")
-    
-    # parse version already throws exceptions if formatted badly so can use that to check. catching to make error message more relevant to here
-    try:
-        parse_version_string(graph_node.VERSION)
-    except Exception as e:
-        raise Exception(f"node type <{type_name}> does not have a valid version string {e}")
-    
 
-    parsed_def = yaml.safe_load(graph_node.DEFINITION)
-    if not isinstance(parsed_def, dict) or "options" not in parsed_def:
-        raise Exception(f"node type <{type_name}> cannot be used. definition must have options key")
-    elif parsed_def["options"] is None:
-        raise Exception(f"node type <{type_name}> options key data missing, if trying to have empty set please use \"options: []\"")
-    for option in parsed_def["options"]:
-        if "name" not in option:
-            raise Exception(f"node type <{type_name}> cannot be used. An option in definition is missing a name")
-    
-    parsed_schema = yaml.safe_load(graph_node.SCHEMA)
-    #TODO: maybe use some of JSONSchema validate schema stuff? not sure if exists and how yet
-    if not isinstance(parsed_schema, dict):
-        raise Exception(f"node type <{type_name}> cannot be used. badly formatted schema")
-    
-def load_type(node_type):
-    '''loads an allowed node type's definition and schema into caches. These will be needed during parsing to know what data to use and format of it.
-    Raises Exception if couldn't find type or node type badly defined
-    
-    Parameters
-    node_type - `str`
-        name of the type to load'''
-    parsing_logger.debug(f"loading type <{node_type}>")
-    try:
-        graph_node = getattr(ALLOWED_NODE_TYPES[node_type], node_type+"GraphNode")
-        NODE_DEFINITION_CACHE[node_type] = graph_node.get_node_fields()
-        # dev creating node types should make sure schema for variables introduced by that type is valid
-        NODE_SCHEMA_CACHE[node_type] = graph_node.get_node_schema()
-    except KeyError as e:
-        raise Exception(f"tried to load information about node type named <{node_type}> but couldn't. type isn't registered")
-    except Exception as e:
-        raise Exception(f"tried to load information about node type named <{node_type}> but couldn't. details: {e}")
-    
-def empty_cache():
-    '''empties cache for different node types' definitions and schemas'''
-    NODE_DEFINITION_CACHE.clear()
-    NODE_SCHEMA_CACHE.clear()
+    # UPDATE: version string format now entirely decided by node type, there's no enforcement from system
+    # but kinda hacky way to do early check that the version in the class is correct by checking if compatible with itself
+    is_compatible, warnings, = graph_node.check_version_compatibility(graph_node.get_version())
+    if not is_compatible:
+        raise Exception(f"node type <{type_name}> seems to have a broken version that does not work, or is not compatible with itself." + 
+                        f" errors during check: {warnings}" if warnings else "")
+
+    # making sure fields for this class can be retrieved
+    # the method will raise exception if formatted incorectly, so just call early and let exception happen
+    graph_node.get_node_fields()
+
+    # let the node error out if it can't get a good version of a schema for itself
+    graph_node.get_node_schema()
+    #TODO: maybe use some of JSONSchema meta schema stuff to validate schema is usable by system? not sure how yet
+
+def empty_cache(allowed_types:"dict[str,BaseType.BaseGraphNode]"=ALLOWED_NODE_TYPES):
+    '''empties cache for different node types' definitions and schemas. Nodes may store some cached data as well so clears node caches of the node types
+    passed in as well'''
+    for node_type, node_module in allowed_types.items():
+        graph_node:BaseType.BaseGraphNode = getattr(node_module, node_type+"GraphNode")
+        graph_node.clear_caches()
 
 #~~~~~~~~~ SOME FURTHER SETUP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# always needed, and might as well use the registration functions that handle checks already
-register_node_type(BaseType, "Base")
-load_type("Base")
+# Base is always needed, and might as well use the registration functions that handle checks already
+register_node_type(BaseType, "Base", allowed_types=ALLOWED_NODE_TYPES)
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 def parse_name(name):
     #TODO: future QoL WIP, potentially for names with . in them
     pass
 
-def parse_files(*file_names:str, existing_nodes:dict = None):
+def parse_files(*file_names:str, existing_nodes:dict = None, allowed_types:"dict[str,BaseType.BaseGraphNode]"=ALLOWED_NODE_TYPES):
     '''same idea as `parse_file` parses all the passed in files for nodes and appends them onto existing nodes. Can handle multiple yaml documents
-    in files. raising error if already there or graph node definition badly formatted
-    
+    in files. Raises error if GraphNode already found or GraphNode definition badly formatted
+
     Parameters
     ---
     file_names - any number of strings
-        variable number of comma separated yaml files names to look for nodes in
-    existing_nodes - `dict`
-        dictionary of node id to GraphNode object, parsing treats it as previously parsed nodes you don't want overwritten by newly read nodes
-        
+        variable number of comma separated yaml file names to look for nodes within
+    existing_nodes - `Optional[dict]`
+        dictionary of node id to GraphNode object, parsing treats this as previously parsed nodes you don't want overwritten by newly read nodes
+    allowed_types - `dict[str, module]`
+        dictonary of types that are already registered and allowed to use for parsing. uses global storage dictionary as default, otherwise can override
+        with local registries
+
     Return
     ---
     dict
-        same format as passed in existing nodes. list of existing nodes with ones just parsed from file added'''
+        same format as passed in existing nodes: node id to GraphNode object. list of existing nodes with ones just parsed from file added'''
+    # don't want truthy comparison so user can pass in a dict object they want filled
     existing_nodes = existing_nodes if existing_nodes is not None else {}
     for file_name in file_names:
-        parse_file(file_name, existing_nodes)
+        parse_file(file_name, existing_nodes, allowed_types=allowed_types)
     return existing_nodes
 
-def parse_file(file_name, existing_nodes:dict=None):
+def parse_file(file_name, existing_nodes:dict=None, allowed_types:"dict[str,BaseType.BaseGraphNode]"=ALLOWED_NODE_TYPES):
     '''parses a file for nodes and appends them onto existing nodes. Can handle multiple yaml documents
     in files. Raises error if already there or graph node definition badly formatted
-    
+
     Parameters
     ---
     file_name - `string`
-        yaml files name to look for nodes in
-    existing_nodes - `dict`
-        dictionary of node id to GraphNode object, parsing treats it as previously parsed nodes you don't want overwritten by newly read nodes
-    
+        yaml file's name to look for nodes within
+    existing_nodes - `Optional[dict]`
+        dictionary of node id to GraphNode object, parsing treats this as previously parsed nodes you don't want overwritten by newly read nodes
+    allowed_types - `dict[str, module]`
+        dictonary of types that are already registered and allowed to use for parsing. uses global storage dictionary as default, otherwise can override
+        with local registries
+
     Return
     ---
     dict
-        same format as passed in existing nodes. list of existing nodes with ones just parsed from file added'''
+        same format as passed in existing nodes: node id to GraphNode object. list of existing nodes with ones just parsed from file added'''
+    # don't want truthy comparison so user can pass in a dict object they want filled
     existing_nodes = existing_nodes if existing_nodes is not None else {}
     num_added = 0
     with open(file_name) as file:
@@ -203,9 +191,9 @@ def parse_file(file_name, existing_nodes:dict=None):
             if yaml_doc is None or "nodes" not in yaml_doc or yaml_doc["nodes"] is None or len(yaml_doc["nodes"]) == 0:
                 parsing_logger.info(f"file {file_name} document indexed {doc_ind} does not have list of nodes, moving to next YAML document")
                 continue
-            
+
             for node_ind, yaml_node in enumerate(yaml_doc["nodes"]):
-                node = parse_node(yaml_node, location_printout=f"file <{file_name}> doc <{doc_ind}> node <{node_ind}>")
+                node = parse_node(yaml_node, file_location=f"file <{file_name}> doc <{doc_ind}> node <{node_ind}>", allowed_types=allowed_types)
                 if node.id in existing_nodes:
                     # technically could ignore second, but better to tell whoever wrote it so any differences don't cause confusion of why misbehaving
                     raise Exception(f"Exception at file {file_name} doc {doc_ind} node {node_ind}, node <{node.id}> is already loaded, can't accept the second definition")
@@ -216,53 +204,33 @@ def parse_file(file_name, existing_nodes:dict=None):
     parsing_logger.info(f"finished loading file <{file_name}>, found <{num_added}> nodes from file")
     return existing_nodes
 
-def parse_node(yaml_node, location_printout=""):
+def parse_node(yaml_node, file_location="", allowed_types:"dict[str,BaseType.BaseGraphNode]"=ALLOWED_NODE_TYPES):
     '''function that takes yaml for one node and validates and creates a GraphNode object of the type specified in yaml.
     raises errors for anything wrong in node definition
-    
+
     Parameters
     ---
     yaml_node - `dict`
         loaded yaml object that holds the node's settings
     location_printout - `str`
         extra information to print out in logging or exceptions to help with finding where in the yaml file the error came from
-        
+
     Return
     ---
     GraphNode
         graph node class that represents the type specified in yaml'''
-    parsing_logger.debug(f"parsing node.{' located in '+location_printout if len(location_printout) > 0 else ''}")
-    node_type = validate_yaml_node(yaml_node, location_printout)
+    parsing_logger.debug(f"parsing node.{' located in '+file_location if len(file_location) > 0 else ''}")
+    node_type = validate_yaml_node(yaml_node, file_location, allowed_types=allowed_types)
 
-    # get all options that need to be filled in GraphNode, design is types can extend each other to add more fields
-    all_options = getattr(ALLOWED_NODE_TYPES[node_type], node_type+"GraphNode").get_node_fields()
-    
-    # NOTE: This is older code for when each node stored only its own options and didn't have a way to combine it, get_node_fields method takes care of that now
-    #       if that method breaks, need something like this
-    # all_options = [*NODE_DEFINITION_CACHE["Base"]["options"]]
-    # if node_type != "Base":
-    #     # techinally allows for child class to override definitions by loading it later since it re-sets the value.
-    #     all_options.extend(NODE_DEFINITION_CACHE[node_type]["options"])
-
-    parsing_logger.debug(f"options to look for in node are (note there might be repeats becuase option appears in both child and parent nodes): <{all_options}>")
-    graph_node_model = {}
-    for option in all_options:
-        # used to check if option is required but not in yaml, but handled by schema check now
-        if option["name"] not in yaml_node:
-            if "default" not in option:
-                # most cases, this should be listed as required in schema
-                raise Exception(f"node {'located in '+location_printout+' ' if len(location_printout) > 0 else ''}found optional value '{option['name']}' missing fron yaml and no default value specified")
-            graph_node_model[option["name"]] = copy.deepcopy(option["default"])
-        else:
-            graph_node_model[option["name"]] = copy.deepcopy(yaml_node[option["name"]])
-    # in case there's extra steps from node to verify or format data passed in, moved into constructor
-
-    graph_node=getattr(ALLOWED_NODE_TYPES[node_type],node_type+"GraphNode")(graph_node_model)
+    try:
+        graph_node:BaseType.BaseGraphNode = getattr(allowed_types[node_type], node_type+"GraphNode")(yaml_node)
+    except Exception as e:
+        raise Exception(f"node {'located in '+file_location+' ' if len(file_location) > 0 else ''} errored: {e}")
     parsing_logger.debug(f"parsed node is <{graph_node.id}>")
     return graph_node
 
-def validate_yaml_node(yaml_node, location_printout=""):
-    '''validates yaml definition of node. checks type is allowed, version is close enough to Class definition's version, and validates using schema.
+def validate_yaml_node(yaml_node, file_location="", allowed_types:"dict[str,BaseType.BaseGraphNode]"=ALLOWED_NODE_TYPES):
+    '''validates parsed yaml correctly defines a node. checks type is allowed, version is close enough to Class definition's version, and validates using schema.
     raises errors if node type is not allowed, versions are too far, bad node type definitions, or any other bad formatting in yaml
 
     Parameters
@@ -271,46 +239,49 @@ def validate_yaml_node(yaml_node, location_printout=""):
         loaded yaml object that holds the node's settings
     location_printout - `str`
         extra information to print out in logging or exceptions to help with finding where in the yaml file the error came from
-        
+
     Return
     ---
     string
         node type pf just validated node'''
-    node_type = "Base" #default assumed type, the most basic node
-    if "Base" not in ALLOWED_NODE_TYPES:
+
+    node_type = "Base" # default assumed type, the most basic node
+    if "Base" not in allowed_types:
         parsing_logger.critical(f"something is very badly weirdly wrong. trying to validate but Base Type was removed"+\
-                                "from allowed node types. re-registering but check execution to make sure this doesn't happen")
-        register_node_type(BaseType, "Base")
+                                "from allowed node types list. re-registering but check execution to make sure this doesn't happen")
+        register_node_type(BaseType, "Base", allowed_types=allowed_types)
     if "type" in yaml_node:
-        if yaml_node["type"] not in ALLOWED_NODE_TYPES.keys():
-            raise Exception(f"{'located in '+location_printout+', ' if len(location_printout) > 0 else ''}<{yaml_node['type']}> is unknown type")
+        if yaml_node["type"] not in allowed_types.keys():
+            raise Exception(f"found node {'located in '+file_location+', ' if len(file_location) > 0 else ''}<{yaml_node['type']}> is unknown type. says {yaml_node['type']} but type is not registered")
         node_type = yaml_node["type"]
-    
-    # version label is grabbed, semi-checked since don't know what else is needed for it
+
+    graph_node:BaseType.BaseGraphNode = getattr(allowed_types[node_type], node_type+"GraphNode")
+
+    # version label is grabbed and checked. each node type handles versions separately
+    # yaml can use one of two different keys
     node_version = None
-    if "version" in yaml_node:
+    if "version" in yaml_node and "v" in yaml_node:
+        raise Exception(f"yaml node {'located in '+file_location+' ' if len(file_location) > 0 else ''}has two keys specifying version, use only one")
+    elif "version" in yaml_node:
         node_version = yaml_node["version"]
     elif "v" in yaml_node:
+        parsing_logger.warning(f"v field deprecated, please use version instead")
         node_version = yaml_node["v"]
-    
-    if not node_version:
-        parsing_logger.warning(f"yaml node {'located in '+location_printout+' ' if len(location_printout) > 0 else ''}found without version, "+\
-                                     f"assuming most recent version of {getattr(ALLOWED_NODE_TYPES[node_type],node_type+'GraphNode').VERSION}")
-        node_version = getattr(ALLOWED_NODE_TYPES[node_type],node_type+"GraphNode").VERSION
 
-    actual_version = parse_version_string(node_version)
-    target_version = parse_version_string(getattr(ALLOWED_NODE_TYPES[node_type],node_type+"GraphNode").VERSION)
-    if actual_version[0] != target_version[0] or actual_version[1] != target_version[1]:
-        raise Exception(f"yaml node {'located in '+location_printout+' ' if len(location_printout) > 0 else ''}has version of <{node_version}> is "+ \
-                        f"too different from version of node definion loaded ({getattr(ALLOWED_NODE_TYPES[node_type],node_type+'GraphNode').VERSION}), "+ \
-                        f"please update yaml definition or load matching version")
-    #TODO: are there more checking version mismatches?
-    # make sure type definition already parsed as well
-    if node_type not in NODE_DEFINITION_CACHE:
-        load_type(node_type)
+    if not node_version:
+        parsing_logger.debug(f"yaml node {'located in '+file_location+' ' if len(file_location) > 0 else ''}found without version")
+
+    is_compatible, warnings = graph_node.check_version_compatibility(node_version)
+
+    if is_compatible:
+        if warnings:
+            parsing_logger.warning(f"yaml node {'located in '+file_location+' ' if len(file_location) > 0 else ''}has some version warnings: {warnings}")
+    else:
+        raise Exception(f"yaml node {'located in '+file_location+' ' if len(file_location) > 0 else ''}has version of <{node_version}> that is not compatible." +
+                        f" errors from version check: {warnings}" if warnings else "")
 
     try:
-        validate(yaml_node, getattr(ALLOWED_NODE_TYPES[node_type], node_type+"GraphNode").get_node_schema())
+        validate(yaml_node, graph_node.get_node_schema())
     except ValidationError as ve:
         # schema validation failed. want to catch and print the error information in a format that is easier to debug than default.
         # error printout on terminal still prints out the original version of the error before the custom one though
@@ -318,9 +289,9 @@ def validate_yaml_node(yaml_node, location_printout=""):
         path = "node"
         if len(path_elements) > 0:
             path+="."+'.'.join(path_elements)
-        except_message = f"Exception {'located in '+location_printout+', ' if len(location_printout) > 0 else ''}"\
+        except_message = f"Exception {'located in '+file_location+', ' if len(file_location) > 0 else ''}"\
                         "yaml definition provided does not fit expected format within '"\
                         f"{path}' error message: {ve.message}"
         raise Exception(except_message)
-    
+
     return node_type
