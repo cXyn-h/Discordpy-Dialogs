@@ -20,9 +20,11 @@ def callback_settings(schema:typing.Union[dict, str]=None, allowed_sections:'lis
     `has_parameter` - "always", "optional" or None
         whether the function always needs, optionally takes, or never takes a parameter
     `cb_key` - str
-        key that will be used in yaml to specify this function
+        per function setting for the key that will be used in yaml to specify this function, overrideable by individual handlers
     allowed_events - list[str]
-        WIP yet to implement, events that this function can handle'''
+        WIP yet to implement, events that this function can handle
+    allowed_nodes - list[str]
+        WIP yet to implement, node types that can use this function'''
     return lambda func: set_callback_settings(func=func, schema=schema, allowed_sections=allowed_sections, 
                                               has_parameter=has_parameter, cb_key=cb_key, allowed_events=allowed_events, allowed_nodes=allowed_nodes)
 
@@ -39,9 +41,11 @@ def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_sec
     `has_parameter` - "always", "optional" or None
         whether the function always needs, optionally takes, or never takes a parameter
     `cb_key` - str
-        key that will be used in yaml to specify this function
+        per function setting for the key that will be used in yaml to specify this function, overrideable by individual handlers
     allowed_events - list[str]
-        WIP yet to implement, events that this function can handle'''
+        WIP yet to implement, events that this function can handle
+    allowed_nodes - list[str]
+        WIP yet to implement, node types that can use this function'''
     filtered_allowed_sections = set()
     if allowed_sections is not None:
         for section in allowed_sections:
@@ -60,6 +64,23 @@ def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_sec
     func.schema = schema if schema is not None else {}
     func.has_parameter = has_parameter
     func.cb_key = cb_key or func.__name__
-    func.allowed_events = allowed_events
-    func.alowed_nodes = allowed_nodes
+    func.allowed_events = allowed_events if allowed_events else []
+    func.alowed_nodes = allowed_nodes if allowed_nodes else []
     return func
+
+def is_callback_setup(func):
+    return hasattr(func, "schema") and hasattr(func, "allowed_sections") and hasattr(func, "has_parameter") and hasattr(func, "cb_key")  and \
+            hasattr(func, "allowed_events") and hasattr(func, "allowed_nodes")
+
+class CallbackDatapack():
+    '''class that will hold all data that is being passed to each callback'''
+    def __init__(self, handler, active_node, event, parameter, goal_node_name=None, goal_node=None, **kwargs):
+        self.handler = handler
+        self.active_node = active_node
+        self.event = event
+        self.goal_node_name = goal_node_name
+        self.goal_node = goal_node
+        self.parameter = parameter
+
+        for option, data in kwargs.items():
+            setattr(self, option, data)

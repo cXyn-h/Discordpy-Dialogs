@@ -11,7 +11,7 @@ bot = SimpleBot(command_prefix="$", intents=intents)
 
 @bot.listen()
 async def on_message(message: discord.Message):
-    await bot.main_menu_handler.notify_event("message", message)
+    await bot.main_menu_handler.handle_event("message", message)
 
 @bot.command()
 async def menu(ctx):

@@ -1,4 +1,4 @@
-from src.utils.Cache import AbstractIndex, AbstractCacheEntry
+from src.utils.Cache_old import AbstractIndex, AbstractCacheEntry
 import src.DialogNodes.BaseType as BaseType
 import typing
 
@@ -6,8 +6,8 @@ class CacheNodeIndex(AbstractIndex):
     '''index for cache storing active node objects'''
     def __init__(self, name, indexing_field:typing.Literal["event", "session", "status"]) -> None:
         super().__init__(name)
-        if indexing_field not in ["event", "session", "status"]:
-            raise Exception(f"Index for active Nodes stored in Dialog handler given a field name that it does not support indexing on. must be 'event', 'session', or 'status'")
+        if indexing_field not in ["event", "session", "status", "graph_node"]:
+            raise Exception(f"Index for active Nodes stored in Dialog handler given a field name that it does not support indexing on. must be 'event', 'session', 'status', or 'graph_node")
         self.indexing_field = indexing_field
 
     def parse_for_keys(self, entry: AbstractCacheEntry):
@@ -19,6 +19,8 @@ class CacheNodeIndex(AbstractIndex):
             return list(entry.graph_node.get_events().keys())
         elif self.indexing_field == "status":
             return [entry.status]
+        elif self.indexing_field == "graph_node":
+            return entry.graph_node.id
         else:
             return []
         

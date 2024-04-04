@@ -1,12 +1,12 @@
 import pytest
-import src.utils.Cache as Cache
+import src.utils.Cache_old as Cache_old
 from datetime import datetime, timedelta
 
 # tests for updates on CacheEntry objects. Just that type.
 
 def test_update_primary():
     '''test updating on primary indices updates data and indices and or_create flag operates correctly'''
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     # testing or_create does add
     entry = c.update("One", {"id": "One", "val1": 3, "val2": "a"}, index_name="primary")
     assert len(c.data) == 1
@@ -41,7 +41,7 @@ def test_update_primary():
 
 def test_update_nonexistant_secondary():
     '''test trying to update or create when trying to find items with a secondary index that doesn't exist'''
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     entry = c.update("One", {"id": "One", "val1": 3, "val2": "a"}, index_name="primary")
     # test trying to update using nonexistant index allows create
     entry = c.update("One", {"id": "One", "val1": 1234, "val2": "cd"}, index_name="asdf")
@@ -61,7 +61,7 @@ def test_update_nonexistant_secondary():
 
 def test_update_seconadary():
     '''updates using find by secondary index'''
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     entry = c.update("One", {"id": "One", "val1": 3, "val2": "a"}, index_name="primary")
     entry = c.update("Two", {"id": "Two", "val1": 3, "val2": "cd"}, index_name="primary")
     # test updates on secondary index
@@ -106,15 +106,15 @@ def test_update_seconadary():
 
 def test_update_copy_rule():
     '''test copy rules for updating data'''
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
 
     update_data = {"obj": set()}
-    c.update("One", update_data, index_name="primary", addition_copy_rule=Cache.COPY_RULES.DEEP)
+    c.update("One", update_data, index_name="primary", addition_copy_rule=Cache_old.COPY_RULES.DEEP)
     update_data["obj"].add("b")
     assert "b" not in c.data["One"].data["obj"]
     update_data["obj"].remove("b")
-    c.update("Two", update_data, index_name="primary", addition_copy_rule=Cache.COPY_RULES.SHALLOW)
+    c.update("Two", update_data, index_name="primary", addition_copy_rule=Cache_old.COPY_RULES.SHALLOW)
     update_data["obj"].add("b")
     assert "b" in c.data["Two"].data["obj"]
     update_data["obj"].remove("b")
@@ -122,7 +122,7 @@ def test_update_copy_rule():
     update_data["test2"] = 1
     assert "test2" not in c.data["Two"].data
     del update_data["test2"]
-    c.update("Three", update_data, index_name="primary", addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    c.update("Three", update_data, index_name="primary", addition_copy_rule=Cache_old.COPY_RULES.ORIGINAL)
     update_data["obj"].add("b")
     assert "b" in c.data["Three"].data["obj"]
     update_data["obj"].remove("b")
@@ -135,49 +135,49 @@ def test_update_strat_ADD():
     '''testing for strat that allows modifying lists inside a cache entry's data easier. 
     for lists, dicts and sets should add the pased in elements. for primitive types should be like a regular dict update and add/replace value'''
 
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2","val2"), Cache.CollectionIndex("val3","val3"), Cache.CollectionIndex("val4","val4")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2","val2"), Cache_old.CollectionIndex("val3","val3"), Cache_old.CollectionIndex("val4","val4")])
 
 
-    c.update("One", {"val1": 1, "val2": ["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val1": 1, "val2": ["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 1, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val1": None, "val2": None, "val3": None, "val4": None}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val1": None, "val2": None, "val3": None, "val4": None}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 1, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val1": 1, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val1": 1, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 1, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"]), 4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"]), "testb": set(["One"])}
 
-    c.update("One", {"val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 1, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
 
-    c.update("One", {"val1": 4}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val1": 4}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"]), 4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"]), "testb": set(["One"])}
 
-    c.update("One", {}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"]), 4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"]), "testb": set(["One"])}
 
-    c.update("One", {"val2": [{1,2}]}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val2": [{1,2}]}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D", {1,2}], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
@@ -189,31 +189,31 @@ def test_update_strat_SET():
     for lists, dicts and sets should set the whole thing to what was passed in. 
     for primitive types should be like a regular dict update and add/replace value'''
 
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2","val2"), Cache.CollectionIndex("val3","val3"), Cache.CollectionIndex("val4","val4")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2","val2"), Cache_old.CollectionIndex("val3","val3"), Cache_old.CollectionIndex("val4","val4")])
 
-    c.update("One", {"val1": 1, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val1": 1, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 1, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val1": 1, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val1": 1, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 1, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}
     assert c.secondary_indices["val2"].pointers == {"C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testb": set(["One"])}
 
-    c.update("One", {"val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 1, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}, "val5": "asdf"}
 
-    c.update("One", {"val1": 4}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val1": 4}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 4, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testb": set(["One"])}
 
-    c.update("One", {}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 4, "val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"C": set(["One"]), "D": set(["One"])}
@@ -224,54 +224,54 @@ def test_update_strat_DELETE():
     '''testing for strat that allows modifying lists inside a cache entry's data easier. 
     for lists, dicts and sets should delete the elements listed. for primitive types should delete the field'''
 
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2","val2"), Cache.CollectionIndex("val3","val3"), Cache.CollectionIndex("val4","val4")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2","val2"), Cache_old.CollectionIndex("val3","val3"), Cache_old.CollectionIndex("val4","val4")])
 
-    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"]), 4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"]), "testb": set(["One"])}
 
-    c.update("One", {"val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val2":["C", "D"], "val3": set([4]), "val4": {"testb": "B"}}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}
 
-    c.update("One", {"val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B"], "val3": set([1,2,3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val1": None, "val3": [1,2]}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val1": None, "val3": [1,2]}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val2":["A", "B"], "val3": set([3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val2":["A", "B"], "val3": set([3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val2": [1, 2, 3], "val3": "F"}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val2": [1, 2, 3], "val3": "F"}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val2":["A", "B"], "val3": set([3]), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {}
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
-    c.update("One", {"val3": 3, "val2": None, "val4": [set([1,2])]}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val3": 3, "val2": None, "val4": [set([1,2])]}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {"val3": set(), "val4": {"testa": "A"}}
     assert c.secondary_indices["val1"].pointers == {}
     assert c.secondary_indices["val2"].pointers == {}
@@ -279,10 +279,10 @@ def test_update_strat_DELETE():
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"])}
 
 def test_update_delete_fields():
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2","val2"), Cache.CollectionIndex("val3","val3"), Cache.CollectionIndex("val4","val4")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2","val2"), Cache_old.CollectionIndex("val3","val3"), Cache_old.CollectionIndex("val4","val4")])
 
-    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.SET)
-    c.update("One", {"val1": None, "val2": None, "val3": None, "val4": None, "val5": "dsfs"}, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
+    c.update("One", {"val1": None, "val2": None, "val3": None, "val4": None, "val5": "dsfs"}, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {}
     assert c.secondary_indices["val1"].pointers == {}
     assert c.secondary_indices["val2"].pointers == {}
@@ -290,14 +290,14 @@ def test_update_delete_fields():
     assert c.secondary_indices["val4"].pointers == {}
 
 def test_mix_copy_strat():
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2","val2"), Cache.CollectionIndex("val3","val3"), Cache.CollectionIndex("val4","val4")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2","val2"), Cache_old.CollectionIndex("val3","val3"), Cache_old.CollectionIndex("val4","val4")])
 
-    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
 
-    cache_one_data = c.get("One", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0]
+    cache_one_data = c.get("One", override_copy_rule=Cache_old.COPY_RULES.ORIGINAL)[0]
 
     # test update with no changes doesn't affect anything when SET fields update mode
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert cache_one_data.data is c.data["One"].data
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
@@ -309,7 +309,7 @@ def test_mix_copy_strat():
     del cache_one_data.data["val1"]
     assert c.data["One"].data == {"val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert c.secondary_indices["val1"].pointers == {4: set(["One"])}
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     assert cache_one_data.data is c.data["One"].data
     assert c.secondary_indices["val1"].pointers == {}
@@ -325,7 +325,7 @@ def test_mix_copy_strat():
     assert c.secondary_indices["val2"].pointers == {"A": set(["One"]), "B": set(["One"]), "C": set(["One"]), "D": set(["One"])}
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"]), 4: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testa": set(["One"]), "testb": set(["One"])}
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val2":["A", "B", "D"], "val3": set([1,2,3]), "val4": {"testb": "B"}, "val5": "asdf"}
     assert cache_one_data.data is c.data["One"].data
     assert c.secondary_indices["val1"].pointers == {}
@@ -333,7 +333,7 @@ def test_mix_copy_strat():
     assert c.secondary_indices["val3"].pointers == {1: set(["One"]), 2: set(["One"]), 3: set(["One"])}
     assert c.secondary_indices["val4"].pointers == {"testb": set(["One"])}
 
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.DELETE)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.DELETE)
     assert c.data["One"].data == {'val2': [], 'val3': set(), 'val4': {}}
     assert cache_one_data.data is c.data["One"].data
     assert c.secondary_indices["val1"].pointers == {}
@@ -344,7 +344,7 @@ def test_mix_copy_strat():
     cache_one_data.data.update({"val2": [], "val1": 1})
     assert c.secondary_indices["val1"].pointers == {}
     assert c.secondary_indices["val2"].pointers == {}
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert cache_one_data.data is c.data["One"].data
     assert c.data["One"].data == {"val1": 1, "val2":[], 'val3': set(), 'val4': {}}
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
@@ -353,7 +353,7 @@ def test_mix_copy_strat():
     cache_one_data.data.update({"val2": ["A","B"], "val1": 1})
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {}
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert cache_one_data.data is c.data["One"].data
     assert c.data["One"].data == {"val1": 1, "val2":["A","B"], 'val3': set(), 'val4': {}}
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
@@ -361,32 +361,32 @@ def test_mix_copy_strat():
 
     # test weird situation. og data changed, but update won't change anything. indices should reflect og even if update doesn't do anything
     cache_one_data.data["val2"].remove("A")
-    c.update("One", cache_one_data.data, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", cache_one_data.data, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 1, "val2":["B"], 'val3': set(), 'val4': {}}
     assert c.secondary_indices["val1"].pointers == {1: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {"B": set(["One"])}
 
 def test_update_wrong_data_types():
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2","val2"), Cache.CollectionIndex("val3","val3"), Cache.CollectionIndex("val4","val4")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2","val2"), Cache_old.CollectionIndex("val3","val3"), Cache_old.CollectionIndex("val4","val4")])
 
-    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val1": 4, "val2":["A", "B", "C", "D"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
 
-    c.update("One", {"val2":"Sdfsdf", "val3": [1,2,3,4], "val4": set(["testa", 1])}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val2":"Sdfsdf", "val3": [1,2,3,4], "val4": set(["testa", 1])}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D", "Sdfsdf"], "val3": set([1,2,3,4]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
     
-    c.update("One", {"val2":set([1,2]), "val3": ["A", "B"], "val4": 1}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val2":set([1,2]), "val3": ["A", "B"], "val4": 1}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val1": 4, "val2":["A", "B", "C", "D", "Sdfsdf", 1, 2], "val3": set([1,2,3,4, "A", "B"]), "val4": {"testa": "A", "testb": "B"}, "val5": "asdf"}
 
 def test_nested_dict_update():
     # really recommended not to use nesting, just break the sections out into their own keys next to val2
-    c = Cache.Cache(input_secondary_indices=[Cache.CollectionIndex("val2","val2")])
+    c = Cache_old.Cache(input_secondary_indices=[Cache_old.CollectionIndex("val2","val2")])
 
-    c.update("One", {"val2": {"section1": {"testa": "A"}, "section2": {"testa": "a", "testb": "B"}}}, field_update_strat=Cache.UPDATE_STRAT.SET)
+    c.update("One", {"val2": {"section1": {"testa": "A"}, "section2": {"testa": "a", "testb": "B"}}}, field_update_strat=Cache_old.UPDATE_STRAT.SET)
     assert c.data["One"].data == {"val2": {"section1": {"testa": "A"}, "section2": {"testa": "a", "testb": "B"}}}
     assert c.secondary_indices["val2"].pointers == {"section1": set(["One"]), "section2": set(["One"])}
 
 
-    c.update("One", {"val2": {"section2": {"testc":"C"}}}, field_update_strat=Cache.UPDATE_STRAT.ADD)
+    c.update("One", {"val2": {"section2": {"testc":"C"}}}, field_update_strat=Cache_old.UPDATE_STRAT.ADD)
     assert c.data["One"].data == {"val2": {"section1": {"testa": "A"}, "section2": {"testc": "C"}}}
     assert c.secondary_indices["val2"].pointers == {"section1": set(["One"]), "section2": set(["One"])}
     #TODO: test outputs here?

@@ -1,9 +1,9 @@
 import pytest
-import src.utils.Cache as Cache
+import src.utils.Cache_old as Cache_old
 
 def test_primary_key_set():
     '''test set updates data and indices upon first and second set on same primary key'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     entry = c.set("One", {"id": "One", "val1": 3, "val2": [1,2]}, index_name="primary")
     assert entry is not None
     assert len(c.data) == 1
@@ -35,7 +35,7 @@ def test_primary_key_set():
 
 def test_nonexistant_secondary_set():
     '''test trying to set on non existant key doesn't do anything'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     entry = c.set("One", {"id": "One", "val1": 3, "val2": "a"}, index_name="asdf", or_create=False)
     assert entry is None
     assert len(c.data) == 0
@@ -46,7 +46,7 @@ def test_nonexistant_secondary_set():
 
 def test_set_empty():
     '''test setting list to empty updates data and indices'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     entry = c.set("One", {"id": "One", "val1": 3, "val2": [5,"A"]}, index_name="primary")
     assert entry.data == {"id": "One", "val1": 3, "val2": [5,"A"]}
     assert len(c.data) == 1
@@ -64,7 +64,7 @@ def test_set_empty():
     assert c.secondary_indices["val2"].pointers == {}
 
 def test_set_secondary_empty():
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": [5,"A"]}, "Two": {"id": "Two", "val1": 16, "val2": [9,"A"]}})
     
     results = c.set(key="A", value={}, index_name="val2")
@@ -78,7 +78,7 @@ def test_set_secondary_empty():
     assert c.secondary_indices["val2"].pointers == {}
 
 def test_set_secondary():
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": [5,"A"]}, "Two": {"id": "Two", "val1": 16, "val2": [9,"A"]}})
     
     results = c.set(key="A", value={"val1": 4, "val2":["fd"]}, index_name="val2")
@@ -99,7 +99,7 @@ def test_set_secondary():
     assert c.secondary_indices["val2"].pointers == {}
 
 def test_set_secondary_or_create():
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add_all({"One": {"val1": 4, "val2":["fd"]}, "Two": {"id": "Two", "val1": 16, "val2": [9,"A"]}})
     # make sure or_create doesn't break updates on secondary indices
     result = c.set(16, {"test": "asdf"}, index_name="val1", or_create=False)
@@ -130,15 +130,15 @@ def test_set_secondary_or_create():
 
 def test_set_copy_rules():
     '''test copy rules for setting data'''
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
 
     update_data = {"obj": set()}
-    c.set("One", update_data, index_name="primary", addition_copy_rule=Cache.COPY_RULES.DEEP)
+    c.set("One", update_data, index_name="primary", addition_copy_rule=Cache_old.COPY_RULES.DEEP)
     update_data["obj"].add("b")
     assert "b" not in c.data["One"].data["obj"]
     update_data["obj"].remove("b")
-    c.set("Two", update_data, index_name="primary", addition_copy_rule=Cache.COPY_RULES.SHALLOW)
+    c.set("Two", update_data, index_name="primary", addition_copy_rule=Cache_old.COPY_RULES.SHALLOW)
     update_data["obj"].add("b")
     assert "b" in c.data["Two"].data["obj"]
     update_data["obj"].remove("b")
@@ -146,7 +146,7 @@ def test_set_copy_rules():
     update_data["test2"] = 1
     assert "test2" not in c.data["Two"].data
     del update_data["test2"]
-    c.set("Three", update_data, index_name="primary", addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    c.set("Three", update_data, index_name="primary", addition_copy_rule=Cache_old.COPY_RULES.ORIGINAL)
     update_data["obj"].add("b")
     assert "b" in c.data["Three"].data["obj"]
     update_data["obj"].remove("b")

@@ -1,10 +1,10 @@
 import pytest
-import src.utils.Cache as Cache
+import src.utils.Cache_old as Cache_old
 from datetime import datetime, timedelta
 
 def test_add_data():
     '''test adding simple data entries to cache gets stored correctly'''
-    c = Cache.Cache()
+    c = Cache_old.Cache()
     result = c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3": [1,2]})
     assert result is not None
     # check cache was changed
@@ -19,7 +19,7 @@ def test_add_data():
 
 def test_adding_empty_data():
     '''test adding weird data behaves ok and index on a field doesn't pick up empty'''
-    c = Cache.Cache(input_secondary_indices=["val1"])
+    c = Cache_old.Cache(input_secondary_indices=["val1"])
     result = c.add("One")
 
     assert result is not None
@@ -44,7 +44,7 @@ def test_adding_empty_data():
 
 def test_add_data_indices():
     '''test indices are updating correctly in response to added simple data'''
-    c = Cache.Cache(input_secondary_indices=["val1", "bogus", Cache.CollectionIndex("val3", "val3")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "bogus", Cache_old.CollectionIndex("val3", "val3")])
     result = c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3": [1]})
     assert result is not None
 
@@ -82,7 +82,7 @@ def test_add_data_indices():
 
 def test_add_overwrite_flag():
     '''test adding data for same key and using overwrite flag behaves correctly and indices respond'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val3", "val3")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val3", "val3")])
     result = c.add("One", {"id": "One", "val1": 3, "val2": "a", "val3": [1,2]})
     assert result is not None
     assert c.secondary_indices["val1"].pointers == {3:set(["One"])}
@@ -108,14 +108,14 @@ def test_add_overwrite_flag():
 def test_add_all():
     '''testing using the add multiple entries function updates data in cache correctly. uses same add as rest so assuming indices update as tested in test_add_data_indices'''
     # regular add all works
-    c = Cache.Cache()
+    c = Cache_old.Cache()
     results = c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "Two": {"id": "Two", "val1": 3, "val2": "b"}})
     assert results["One"] is not None
     assert results["Two"] is not None
     assert len(c.data) == 2
 
     # add all with same key listed twice means last one overwrites the rest
-    c = Cache.Cache()
+    c = Cache_old.Cache()
     results = c.add_all({"One": {"id": "One", "val1": 3, "val2": "a"}, "One": {"id": "Two", "val1": 5, "val2": "b"}})
     assert len(results) == 1
     assert c.data["One"].data == {"id": "Two", "val1": 5, "val2": "b"}
@@ -140,13 +140,13 @@ def test_add_all():
 
 def test_add_copy_rule():
     '''testing the rules for how to copy data into the cache work'''
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     update_data = {"obj": set("a")}
-    c.add("Two", update_data, addition_copy_rule=Cache.COPY_RULES.DEEP)
+    c.add("Two", update_data, addition_copy_rule=Cache_old.COPY_RULES.DEEP)
     update_data["obj"].add("b")
     assert "b" not in c.data["Two"].data["obj"]
     update_data["obj"].remove("b")
-    c.add("One", update_data, addition_copy_rule=Cache.COPY_RULES.SHALLOW)
+    c.add("One", update_data, addition_copy_rule=Cache_old.COPY_RULES.SHALLOW)
     update_data["obj"].add("b")
     assert "b" in c.data["One"].data["obj"]
     update_data["obj"].remove("b")
@@ -154,7 +154,7 @@ def test_add_copy_rule():
     update_data["test2"] = 3
     assert "test2" not in c.data["One"].data
     del update_data["test2"]
-    c.add("Three", update_data, addition_copy_rule=Cache.COPY_RULES.ORIGINAL)
+    c.add("Three", update_data, addition_copy_rule=Cache_old.COPY_RULES.ORIGINAL)
     update_data["obj"].add("b")
     assert "b" in c.data["Three"].data["obj"]
     update_data["obj"].remove("b")
@@ -164,11 +164,11 @@ def test_add_copy_rule():
     del update_data["test2"]
 
 def test_add_auto_key():
-    c = Cache.Cache(input_secondary_indices=["val1", "val2"])
+    c = Cache_old.Cache(input_secondary_indices=["val1", "val2"])
     result = c.add(value={"val1": 3, "val2": "a"})
     assert result is not None
     assert len(c.data) == 1
     key = list(c.data.keys())[0]
-    assert {"val1": 3, "val2": "a"} == c.get(key, index_name="primary", override_copy_rule=Cache.COPY_RULES.ORIGINAL)[0].data
+    assert {"val1": 3, "val2": "a"} == c.get(key, index_name="primary", override_copy_rule=Cache_old.COPY_RULES.ORIGINAL)[0].data
     assert c.secondary_indices["val1"].pointers == {3:set([key])}
     assert c.secondary_indices["val2"].pointers == {"a":set([key])}

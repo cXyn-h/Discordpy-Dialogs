@@ -27,6 +27,7 @@ class SimpleBot(Bot):
             logger.info('reconnected as {0.user}'.format(self))
         else:
             logger.info('We have logged in as {0.user}'.format(self))
+            self.loaded = True
             self.main_menu_handler.start_cleaning(self.loop)
 
         
@@ -37,10 +38,10 @@ class SimpleBot(Bot):
         
         if interaction.type == InteractionType.component:
             if interaction.data["component_type"] == discord.ComponentType.button.value:
-                await self.main_menu_handler.notify_event("button_click", interaction)
+                await self.main_menu_handler.handle_event("button_click", interaction)
             if interaction.data["component_type"] == discord.ComponentType.select.value:
-                await self.main_menu_handler.notify_event("select_menu", interaction)
+                await self.main_menu_handler.handle_event("select_menu", interaction)
         elif interaction.type == InteractionType.application_command:
-            await self.main_menu_handler.notify_event("application_command", interaction)
+            await self.main_menu_handler.handle_event("application_command", interaction)
         elif interaction.type == InteractionType.modal_submit:
-            await self.main_menu_handler.notify_event("modal_submit", interaction)
+            await self.main_menu_handler.handle_event("modal_submit", interaction)

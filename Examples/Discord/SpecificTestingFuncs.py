@@ -7,7 +7,10 @@ from src.utils.Enums import POSSIBLE_PURPOSES
 
 # Yep these functions are less generalized, probably similar to what another developer would want to add if customizing
 
-def save_quiz_answer(active_node, event, goal_node):
+def save_quiz_answer(data:cbUtils.CallbackDatapack):
+    active_node = data.active_node
+    event = data.event
+    goal_node = data.goal_node
     if goal_node.session is None:
         return
     if "quiz" not in goal_node.session.data:
@@ -22,26 +25,34 @@ def save_quiz_answer(active_node, event, goal_node):
 cbUtils.set_callback_settings(save_quiz_answer, allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_ACTION])
     
 
-async def report_quiz_answers(active_node, event):
+async def report_quiz_answers(data:cbUtils.CallbackDatapack):
+    active_node = data.active_node
+    event = data.event
     if active_node.session is None:
         return
     message_to_send = "Here is what you responded:\n"+ "\n".join([k+": "+str(v) for k,v in active_node.session.data["quiz"].items()])
     if hasattr(active_node, "message") and active_node.message is not None:
         await active_node.message.edit(content = message_to_send)
     else:
-        await DiscordFuncs.send_message(active_node, event, settings={"use_reply": True, "message":{"content":message_to_send}})
+        data.parameter = {"use_reply": True, "message":{"content":message_to_send}}
+        await DiscordFuncs.send_message(data)
 cbUtils.set_callback_settings(report_quiz_answers, allowed_sections=[POSSIBLE_PURPOSES.ACTION])
 
 
 @cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION])
-async def dropbox_save_message(active_node, event):
+async def dropbox_save_message(data:cbUtils.CallbackDatapack):
+    active_node = data.active_node
+    event = data.event
     active_node.dropbox_message = event
 
 @cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter="always", schema={"type":"object","properties":{"redirect":{"type":"object",
         "properties":{"dest_channel_id":{"type":["string","integer"]}}, "required":["dest_channel_id"]}, "use_reply":{"type":"string",
         "enum":["ping","no_ping"]}},"required":["redirect"] })
-async def dropbox_send_message(active_node, event, settings):
-    bot = active_node.handler.bot
+async def dropbox_send_message(data:cbUtils.CallbackDatapack):
+    active_node = data.active_node
+    event = data.event
+    settings = data.parameter
+    bot = data.handler.bot
 
     channel = await bot.fetch_channel(settings["redirect"]["dest_channel_id"])
     copy_message = {k:getattr(active_node.dropbox_message,k) for k in ["content"]}

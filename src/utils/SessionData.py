@@ -13,10 +13,7 @@ class SessionData:
         self.status = ITEM_STATUS.INACTIVE
 
     def set_TTL(self, timeout_duration=timedelta(minutes=10)):
-        if timeout_duration is None:
-            # should not really happen
-            timeout_duration = timedelta(self.graph_node.TTL)
-
+        '''sets the session timeout to the specified amount of time from now. a total time duration of -1 means no timeout'''
         if timeout_duration.total_seconds() == -1:
             # specifically, don't time out
             self.timeout = None
@@ -28,15 +25,24 @@ class SessionData:
         #     node.set_TTL(time_left)
 
     def get_linked_nodes(self):
+        '''get nodes that are linked together through this session'''
         return self.linked_nodes
     
     def add_node(self, active_node):
         #TODO: checking if node is already inside?
-        self.set_TTL()
         self.linked_nodes.append(active_node)
 
-    def clear_session_history(self):
-        self.linked_nodes = []
+    def clear_session_history(self, exceptions=[]):
+        if len(exceptions) > 0:
+            deletable = []
+            for node in self.linked_nodes:
+                if node not in exceptions:
+                    deletable.append(node)
+
+            for node in deletable:
+                self.linked_nodes.remove(node)
+        else:
+            self.linked_nodes.clear()
 
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()

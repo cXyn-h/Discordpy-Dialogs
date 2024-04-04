@@ -87,7 +87,7 @@ graph_start:
   test:
 '''
     parsed_node = DialogParser.parse_node(yaml.safe_load(nodes)) 
-    h.add_nodes({parsed_node.id:parsed_node})
+    h.add_graph_nodes({parsed_node.id:parsed_node})
 
     await h.start_at("One", "test", {})
     now = datetime.utcnow()
@@ -247,7 +247,7 @@ async def test_clean_should_never_run():
     start_time = datetime.utcnow()
     assert h.cleaning_status["state"] == CLEANING_STATE.STOPPED
     # invalid start of task, needs to be in STARTING or RUNNING state
-    h.cleaning_task = asyncio.get_event_loop().create_task(h.clean_task(delay=0))
+    h.cleaning_task = asyncio.get_event_loop().create_task(h.clean_task(task_period=0))
     counter = 0
     while not h.cleaning_task.done() and counter < 20:
         assert h.cleaning_status["state"] != CLEANING_STATE.RUNNING
@@ -291,7 +291,7 @@ async def test_two_task_interference():
     await asyncio.sleep(0.5)
     assert h.cleaning_status["state"] == CLEANING_STATE.RUNNING
     first_clean = h.cleaning_task
-    second_clean = asyncio.get_event_loop().create_task(h.clean_task(delay=0))
+    second_clean = asyncio.get_event_loop().create_task(h.clean_task(task_period=0))
     assert abs((datetime.utcnow() - h.cleaning_status["now"] - timedelta(seconds=0.5)).total_seconds()) < 0.5
     assert abs((h.cleaning_status["next"] - datetime.utcnow() - timedelta(seconds=4.5)).total_seconds()) < 0.5
     await asyncio.sleep(1)

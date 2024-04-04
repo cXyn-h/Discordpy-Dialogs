@@ -5,6 +5,7 @@ nodes:
     graph_start:
       message_command:
       slash_command:
+    TTL: 3
     actions:
       - edit_message:
           menu: true
@@ -20,6 +21,8 @@ nodes:
                 type: Button
                 style: red
                 label: no.
+    close_actions:
+      - remove_message
     events:
       button_click:
         filters:
@@ -27,7 +30,8 @@ nodes:
         schedule_close: node
         transitions:
           - node_names: question1
-            session_chaining: start
+            session_chaining: 
+              start
             transition_filters:
               - button_is: begin
             transition_actions:
@@ -70,6 +74,9 @@ nodes:
             session_chaining: chain
             transition_filters:
               - button_is: help1
+      timeout:
+        actions:
+          - remove_message
 
   - id: question2
     type: Base

@@ -1,9 +1,9 @@
 from enum import Enum
 class ITEM_STATUS(Enum):
-    INACTIVE = 0
-    ACTIVE = 1
-    CLOSING = 2
-    CLOSED = 3
+    INACTIVE = 0    # paused, turned off, is still there and wanted
+    ACTIVE = 1      # running and wanted
+    CLOSING = 2     # in process of final clean up
+    CLOSED = 3      # cleaned up, not wanted anymore and likely to be deleted soon
 
 EXCEPTION_LEVEL = {
     "warnings": 0, # raise exception on warnings as well as exceptions
@@ -23,3 +23,8 @@ class CLEANING_STATE(Enum):
     PAUSED=3
     STOPPING=4
     STOPPED=5
+
+class TASK_STATE(Enum):
+    WAITING=2
+    EVENT=3
+    CLOSING=4

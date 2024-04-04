@@ -10,8 +10,8 @@ from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
 import src.utils.Cache as Cache
 
-class BaseGraphNode(Cache.AbstractCacheEntry):
-    VERSION = "3.6.0"
+class BaseGraphNode:
+    VERSION = "3.7.0"
     # this specifies what fields will be copied into graph node
     FIELDS='''
 options:
@@ -54,7 +54,14 @@ properties:
                             items:
                                 type: ["string", "object"]
                         session_chaining:
-                            enum: ["start"]
+                            oneOf:
+                                - enum: ["start"]
+                                - type: object
+                                  properties:
+                                    start:
+                                        type: number
+                                        minimum: -1
+                                  additionalProperties: False
                         setup:
                             type: array
                             items:
@@ -109,12 +116,31 @@ properties:
                                               items:
                                                 enum: ["node", "session"]
                                     session_chaining:
-                                        enum: ["start", "chain", "section"]
+                                        oneOf:
+                                            - enum: ["start", "chain", "section"]
+                                            - type: object
+                                              properties:
+                                                start:
+                                                  type: number
+                                                  minimum: -1
+                                              additionalProperties: False
+                                            - type: object
+                                              properties:
+                                                chain:
+                                                  type: number
+                                                  minimum: -1
+                                              additionalProperties: False
+                                            - type: object
+                                              properties:
+                                                section:
+                                                  type: number
+                                                  minimum: -1
+                                              additionalProperties: False
                                 required: [node_names]
                       unevaluatedProperties: false
         unevaluatedProperties: false
     TTL: 
-        type: integer
+        type: number
         minimum: -1
     close_actions:
         type: array
@@ -167,11 +193,10 @@ required: ["id"]
             Makes sure all and only all fields listed in Graph node type's class are defined. values that are not primitives should be copied before passing in.
             On missing values, tries to use defaults from class.FIELDS, otherwise raises an exception. Ignores extras.
         '''
-        # super class cache object setup
-        super().__init__(id(self), timeout=-1)
-
-        # keeping track of missing things
-        options_left = []
+        # need to get data for all fields that need to exist for node, so get list of all fields and their defaults and go through 
+        # passed in list for this instance's values
+        # keeping track of missing fields
+        options_missing = []
         for field in self.__class__.get_node_fields():
             field_name = field["name"]
             if field_name in options:
@@ -179,11 +204,20 @@ required: ["id"]
             elif "default" in field:
                 setattr(self, field_name, copy.deepcopy(field["default"]))
             else:
-                options_left.append(field_name)
+                options_missing.append(field_name)
         
         # assuming all options found from getting node fields are required, so no default and nothing specified in passed in definition means fail
-        if len(options_left) > 0:
-            raise Exception(f"node object of type {self.__class__.__name__} missing values for fields during init: {options_left}")
+        if len(options_missing) > 0:
+            raise Exception(f"node object of type {self.__class__.__name__} missing values for fields during init: {options_missing}")
+        
+        self.set_TTL(timeout_duration=timedelta(seconds=-1))
+
+    def set_TTL(self, timeout_duration:timedelta):
+        if timeout_duration.total_seconds() == -1:
+            # specifically, don't time out
+            self.timeout = None
+        else:
+            self.timeout = datetime.utcnow() + timeout_duration
 
     def activate_node(self, session:typing.Union[None, SessionData.SessionData]=None) -> "BaseNode":
         '''creates and returns an active Node of the GraphNode's type. if there's a passed in session object, ties the created active node to the session'''
@@ -199,6 +233,17 @@ required: ["id"]
     def starts_with_session(self, event_key:str):
         '''checks if the given event requires setting up a session when starting this node.'''
         return self.can_start(event_key) and (self.graph_start[event_key] is not None) and ("session_chaining" in self.graph_start[event_key])
+    
+    def get_start_session_TTL(self, event_key:str):
+        if self.starts_with_session(event_key):
+            if not isinstance(self.graph_start[event_key]["session_chaining"], str):
+                duration = float(self.graph_start[event_key]["session_chaining"]["start"])
+                if duration < -1:
+                    duration = -1
+                return duration
+            else: 
+                return None
+        return None
     
     def get_start_callbacks(self, event_key:str):
         '''returns a list of function names needed for performing startup actions for the given event_key. startup actions are not required, so will return an empty list if none are listed'''
@@ -433,25 +478,69 @@ required: ["id"]
         if "PARSED_SCHEMA" in vars(cls).keys():
             delattr(cls, "PARSED_SCHEMA")
 
-class BaseNode(Cache.AbstractCacheEntry):
-    DO_NOT_COPY_VARS = ["handler", "cache"]
+    def indexer(self, keys):
+        result_keys = set()
+        if keys[0] == "functions":
+            action_lists = [self.get_callbacks(), self.get_close_callbacks()]
+            if self.graph_start is not None:
+                for event_type, settings in self.graph_start.items():
+                    if settings is None:
+                        continue
+                    if "setup" in settings:
+                        action_lists.append(settings["setup"])
+                    if "filters" in settings:
+                        action_lists.append(settings["filters"])
+            for event_type, settings in self.events.items():
+                if "filters" in settings:
+                    action_lists.append(settings["filters"])
+                if "actions" in settings:
+                    action_lists.append(settings["actions"])
+                if "transitions" in settings:
+                    for transition_num, transition_settings in enumerate(settings["transitions"]):
+                        if "transition_filters" in transition_settings:
+                            action_lists.append(transition_settings["transition_filters"])
+                        if "transition_actions" in transition_settings:
+                            action_lists.append(transition_settings["transition_actions"])
+
+            for action_list in action_lists:
+                for action in action_list:
+                    if isinstance(action, dict):
+                        for func_name in action.keys():
+                            # probably would only have one key which is function name in each action
+                            result_keys.add(func_name)
+                    else:
+                        result_keys.add(action)
+            return [], list(result_keys)
+        if keys[0] == "next_nodes":
+            for event_type, settings in self.events.items():
+                if "transitions" in settings:
+                    for transition_num, transition_settings in enumerate(settings["transitions"]):
+                        if type(transition_settings["node_names"]) is str:
+                            result_keys.add(transition_settings["node_names"])
+                        else:
+                            for next_node in transition_settings["node_names"]:
+                                result_keys.add(next_node)
+            return [], list(result_keys)
+        return None
+
+class BaseNode:
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
-        super().__init__(id(self), timeout = timeout_duration.total_seconds() if timeout_duration is not None else -1)
         self.graph_node = graph_node
         self.session = session
         self.status = ITEM_STATUS.INACTIVE
-        self.handler = None
+
+        self.set_TTL(timeout_duration=timeout_duration if timeout_duration is not None else timedelta(seconds=-1))
+
+    def set_TTL(self, timeout_duration:timedelta):
+        if timeout_duration.total_seconds() == -1:
+            # specifically, don't time out
+            self.timeout = None
+        else:
+            self.timeout = datetime.utcnow() + timeout_duration
 
     def time_left(self) -> timedelta:
         return self.timeout - datetime.utcnow()
         
-    def assign_to_handler(self, handler):
-        '''callback to assign handler instance to node so it can access general data. Called around time node will be added to handler 
-        event tracking, but not always after added. If overriding in child class, be sure to call parent'''
-        #one handler per node. 
-        self.handler = handler
-        self.activate()
-
     def activate(self):
         self.status = ITEM_STATUS.ACTIVE
 
@@ -465,4 +554,3 @@ class BaseNode(Cache.AbstractCacheEntry):
         '''callback for when node is about to close that I don't want showing up in list of custom callbacks. if overriding
         child class, be sure to call parent'''
         self.status = ITEM_STATUS.CLOSED
-        self.handler = None

@@ -1,5 +1,5 @@
 import pytest
-import src.utils.Cache as Cache
+import src.utils.Cache_old as Cache
 from datetime import datetime, timedelta
 
 def test_blank_cache_init():

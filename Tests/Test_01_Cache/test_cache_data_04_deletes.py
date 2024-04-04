@@ -1,9 +1,9 @@
 import pytest
-import src.utils.Cache as Cache
+import src.utils.Cache_old as Cache_old
 
 def test_delete_primary():
     '''testing deleting primary key cleans up data and indices'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     entry = c.add("One", {"id": "One", "val1": 3, "val2": [1,2]})
     assert entry is not None
     assert len(c.data) == 1
@@ -19,7 +19,7 @@ def test_delete_primary():
 def test_delete_nonexistant_primary():
     '''test deleting a primary key that isn't in cache doesn't change data'''
     # no data returned, no changes to data. just gotta make sure doesn't crash too
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add("One", {"id": "One", "val1": 3, "val2": [1,2]})
     c.delete("sdfsd")
     assert len(c.data) == 1
@@ -30,7 +30,7 @@ def test_delete_nonexistant_primary():
 
 def test_delete_nonexistant_secondary():
     '''test deleting on secondary index that doesn't exist doesn't affect anything'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add("One", {"id": "One", "val1": 3, "val2": [1,2]})
     c.delete("One", index_name="sdfsd")
     assert len(c.data) == 1
@@ -40,7 +40,7 @@ def test_delete_nonexistant_secondary():
 
 def test_delete_secondary_list():
     '''test deleting secondary with multiple items under the key'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": [1,2]}, "Two": {"id": "Two", "val1": 5, "val2": [2, "A"]}})
 
     c.delete(2, index_name="val2")
@@ -50,7 +50,7 @@ def test_delete_secondary_list():
 
 def test_delete_secondary():
     '''test deleting secondary with just one item under the key'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": [1,2]}, "Two": {"id": "Two", "val1": 5, "val2": [2, "A"]}})
 
     c.delete(3, index_name="val1")
@@ -61,7 +61,7 @@ def test_delete_secondary():
 
 def test_delete_secondary_miss():
     '''test deleting on secondary index but key is not in it'''
-    c = Cache.Cache(input_secondary_indices=["val1", Cache.CollectionIndex("val2", "val2")])
+    c = Cache_old.Cache(input_secondary_indices=["val1", Cache_old.CollectionIndex("val2", "val2")])
     c.add_all({"One": {"id": "One", "val1": 3, "val2": [1,2]}, "Two": {"id": "Two", "val1": 5, "val2": [2, "A"]}})
 
     c.delete(4, index_name="val1")
