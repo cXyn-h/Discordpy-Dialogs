@@ -1,5 +1,7 @@
 # Dialoguer (placeholder title)
-Currently on version 3.6.0, in alpha testing to discover use cases. !!!THIS IS YOUR WARNING THINGS ARE STILL A BIT ROUGH!!! Started and created as a system to manage interactive dialogs for a discord bot, but further designed to extend to situations where the system waits for a variety of events with possibly multiple entities traversing the same graph layout. Version 2.0 is pretty much deprecated<br/>
+Currently on version Alpha 3.8.0.  
+YYAML format is functionally complete for alpha plans and mostly stable, but in alpha testing to discover use cases. !!!THIS IS YOUR WARNING THINGS ARE STILL A BIT ROUGH!!! Started and created as a system to manage interactive dialogs for a Discord bot, but further designed to extend to situations where the system waits for a variety of events with possibly multiple entities traversing the same graph layout.  
+Version 2.0 is pretty much deprecated  
 Designed in collaboration with @e-a-h
 
 __What is this project?__ <br />
@@ -91,7 +93,7 @@ The rest of each node definition will be filled in starting at the same indentat
 Further tip, because of how the library used read yaml works, there's some cases that can have unexpected results for some people. If you have a value that you want to be just the text "yes" or "no" be sure to put quotes around it, or else it will be interpreted as True/False values.
 
 ## Base Graph Node Fields
-required fields and data format for the system to parse nodes
+required fields and data format for the system to parse nodes in version 3.6.0
 * **id** -- required string identifier for node, must be unique among all nodes in the same handler, as that's how the handler finds this node
 * **type** -- This string field itself is optional, but each node has a type. By default all nodes are "Base" type nodes. This field is only needed if you are sure you are using a custom node definition
 * **v or version** -- two names for same thing. Each node type can have a specific version to track their changes separately from each other. This optional field is a text sring for the version the yaml is written for. Three integers separated by periods. If not specified, system assumes you wrote it for the most recent version of the node.

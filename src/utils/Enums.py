@@ -12,6 +12,7 @@ EXCEPTION_LEVEL = {
 }
 
 class POSSIBLE_PURPOSES(Enum):
+    TRANSITION_COUNTER="transition_counter"
     FILTER= "filter"
     TRANSITION_FILTER="transition_filter"
     ACTION= "action"

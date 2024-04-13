@@ -11,7 +11,7 @@ from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 import src.utils.Cache as Cache
 
 class BaseGraphNode:
-    VERSION = "3.7.0"
+    VERSION = "3.8.0"
     # this specifies what fields will be copied into graph node
     FIELDS='''
 options:
@@ -98,9 +98,26 @@ properties:
                                     node_names:
                                         anyOf:
                                             - type: "string"
+                                            - type: object
+                                              patternProperties:
+                                                ".+":
+                                                    type: integer
+                                                    minimun: 1
+                                                    additionalProperties: False
                                             - type: "array"
                                               items:
-                                                type: "string"
+                                                anyOf:
+                                                    - type: "string"
+                                                    - type: object
+                                                      patternProperties:
+                                                        ".+":
+                                                          type: integer
+                                                          minimun: 1
+                                                          additionalProperties: False
+                                    transition_counters:
+                                        type: array
+                                        items:
+                                            type: ["string", "object"]
                                     transition_filters:
                                         type: array
                                         items:
@@ -171,11 +188,11 @@ required: ["id"]
                 function_set_list.append((settings["actions"], self.id, POSSIBLE_PURPOSES.ACTION, f"node {event_type} event actions", event_type))
             if "transitions" in settings:
                 for transition_num, transition_settings in enumerate(settings["transitions"]):
-                    if type(transition_settings["node_names"]) is str:
-                        unique_next_nodes.add(transition_settings["node_names"])
-                    else:
-                        for next_node in transition_settings["node_names"]:
-                            unique_next_nodes.add(next_node)
+                    next_nodes_count = BaseGraphNode.parse_node_names(transition_settings["node_names"])
+                    for next_node in next_nodes_count:
+                        unique_next_nodes.add(next_node)
+                    if "tansition_counters" in transition_settings:
+                        function_set_list.append((transition_settings["transition_counters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_COUNTER, f"node {event_type} event  index {transition_num} transition counters", event_type))
                     if "transition_filters" in transition_settings:
                         function_set_list.append((transition_settings["transition_filters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_FILTER, f"node {event_type} event  index {transition_num} transition filters", event_type))
                     if "transition_actions" in transition_settings:
@@ -296,11 +313,31 @@ required: ["id"]
             return self.events[event_key]["transitions"]
         else:
             return []
-        
+
     def get_close_callbacks(self):
         if self.close_actions is None:
             return []
         return self.close_actions
+    
+    @classmethod
+    def parse_node_names(cls, node_names):
+        '''helper for parsing a given node name found in transition section of node definition. value can be a string for one copy of one node, a dictionary for any number
+        of any group of nodes, or a list to combine the two. each name should only appear once in one transition, if it appears multiple this does not add the amounts it overrides
+        
+        returns
+        ---
+        a dictionary of node name found to count of how many instances to create
+        '''
+        node_name_list = {}
+        if isinstance(node_names, str):
+            node_name_list[node_names] = 1
+        elif isinstance(node_names, dict):
+            node_name_list.update(node_names)
+        else:
+            for item in node_names:
+                returned = cls.parse_node_names(item)
+                node_name_list.update(returned)
+        return node_name_list
     
     @classmethod
     def get_node_fields(cls):

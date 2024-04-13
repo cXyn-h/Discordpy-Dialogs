@@ -49,7 +49,6 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: exception handling, how to direct output
 #TODO: maybe fix cleaning so it doesn't stop if one node excepts? but what to do with that node that excepts when trying to stop and clear?
 #TODO: sessions making sure they work as intended
-#TODO: refine how nodes and sessions lifetimes interact
 #TODO: create modal support
 #TODO: saving and loading active nodes
 #TODO: maybe transition callback functions have a transition info paramter?
@@ -506,116 +505,142 @@ class DialogHandler():
         return action_results
         
     def _run_transition_filters_on_node(self, active_node:BaseType.BaseNode, event_key:str, event) -> "list[typing.Tuple[str,list,str,list]]":
+        '''
+        runs node's callbacks for filters for transitions and returns the transitions that pass filters. note transitions are split by event
+        Return
+        ---
+        a dictionary of node name to transition to mapped to settings for how to transition.
+        - `count` number of copies of next graph node to create
+        - `actions` list of actions that handle transition to the node named in the key
+        - `session_action` what to do with the session when transitioning
+        - `session_timeout` if there's an adjustment to session timeout specified in yaml
+        - `close_flags` if node and/or session should be closed after handling event according to yaml'''
+        # get all transitions since each event we filter all transitions for that event to see if they work
         node_transitions = active_node.graph_node.get_transitions(event_key)
-        passed_transitions:list[typing.Tuple[str,list,str,list]] = []
+        passed_transitions:dict[str, dict] = {}
         for transition_ind, transition in enumerate(node_transitions):
             dialog_logger.debug(f"starting checking transtion <{transition_ind}>")
 
-            # might have just one next node, rest of format expects list of nodes so format it.
-            node_name_list = transition["node_names"]
-            if isinstance(transition["node_names"], str):
-                node_name_list = [transition["node_names"]]
+            # get list of which nodes can transition to, and base counts of how many to generate (ie read in from yaml, can get modified by counters callbacks)
+            transition_node_counts = BaseType.BaseGraphNode.parse_node_names(transition["node_names"])
 
-            dialog_logger.debug(f"nodes named as next in transition <{transition_ind}> are <{node_name_list}>")
+            dialog_logger.debug(f"nodes named as next in transition <{transition_ind}> are <{transition_node_counts.keys()}>")
 
-            close_flag = []
+            # parse the close flags so its a more uniform structure
+            transition_close_flag = []
             if "schedule_close" in transition:
-                close_flag = transition["schedule_close"]
+                transition_close_flag = transition["schedule_close"]
                 if isinstance(transition["schedule_close"], str):
-                    close_flag = [close_flag]
+                    transition_close_flag = [transition_close_flag]
 
-            # callbacks techinically can cause changes to stored session data though more focused on transferring data. so want to keep it clear
-            # separation between filtering and callback stages to keep data cleaner
-            for node_name in node_name_list:
+            if "transition_counters" in transition:
+                count_results = self._counter_runner(copy.deepcopy(transition_node_counts), active_node,event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
+            else:
+                count_results = transition_node_counts
+            # transition actions techinically can cause changes to stored session data.
+            # Want to keep filters for all transitions somewhat similar by making them run on node at same state with same stored data,
+            # so need a clear separation between filtering and callback stages. Running filters then actions for a transition then doing same fot
+            # next transition could cause changes to the filters in later transitions
+            for node_name in transition_node_counts.keys():
                 if node_name not in self.graph_node_indexer:
                     execution_reporting.warning(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> transition won't work, goal node doesn't exist. transition indexed <{transition_ind}>")
                     continue
-                    
+   
                 if "transition_filters" in transition:
                     execution_reporting.debug(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> has transition filters {transition['transition_filters']}")
                     try:
                         filter_res = self._filter_list_runner(active_node, event, transition["transition_filters"], POSSIBLE_PURPOSES.TRANSITION_FILTER, node_name)
                         # transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
                         if isinstance(filter_res, bool) and filter_res:
-                            passed_transitions.append((node_name, transition["transition_actions"] if "transition_actions" in transition else [],
-                                                        transition["session_chaining"] if "session_chaining" in transition else "end", close_flag))
+                            passed_transitions[node_name] = {"count": count_results[node_name],
+                                                             "actions": transition["transition_actions"] if "transition_actions" in transition else [],
+                                                             "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
+                                                                                if "session_chaining" in transition else "end",
+                                                             "session_timeout": None if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
+                                                             "close_flags": transition_close_flag,
+                                                             }
                     except Exception as e:
                         execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>. assuming skip")
                         dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>, details {e}")
                 else:
-                    passed_transitions.append((node_name, transition["transition_actions"] if "transition_actions" in transition else [],
-                                               transition["session_chaining"] if "session_chaining" in transition else "end", close_flag))
+                    passed_transitions[node_name] = {"count": count_results[node_name],
+                                                     "actions": transition["transition_actions"] if "transition_actions" in transition else [],
+                                                     "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
+                                                                    if "session_chaining" in transition else "end",
+                                                     "session_timeout": None if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
+                                                     "close_flags": transition_close_flag,
+                                                    }
         return passed_transitions
 
     async def _run_transitions_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
         '''handles going through transition to new node (not including closing current one if needed) for one node and event pair'''
 
         passed_transitions = self._run_transition_filters_on_node(active_node, event_key, event)
-        # list of single node name to transition to, empty list or list of actions, chaining setting, close setting listed in the yaml
-        dialog_logger.debug(f"transitions for node <{id(active_node)}><{active_node.graph_node.id}> that passed filters are for nodes <{[x[0] for x in passed_transitions]}>, now starting transitions")
+        dialog_logger.debug(f"transitions for node <{id(active_node)}><{active_node.graph_node.id}> that passed filters are for nodes <{[ node_name + ' ' + str(settings['count']) + ' copies' for node_name, settings in passed_transitions.items()]}>, now starting transitions")
 
+        # gathering info about what wants to be done to session by all passed transitions
         passed_session_actions = {}
         dialog_logger.debug(f"gathering passed transitions' settings for handling of session for node <{id(active_node)}><{active_node.graph_node.id}>")
-        for passed_transition in passed_transitions:
-            yaml_session_setting = passed_transition[2] if isinstance(passed_transition[2], str) else list(passed_transition[2].keys())[0]
-            session_timeout = None if isinstance(passed_transition[2], str) else list(passed_transition[2].values())[0]
-            if yaml_session_setting not in passed_session_actions:
-                passed_session_actions[yaml_session_setting] = []
-            passed_session_actions[yaml_session_setting].append({"timeout_setting": session_timeout, "next_nodes": passed_transition[0]})
+        for next_node_name, passed_transition in passed_transitions.items():
+            if passed_transition["session_action"] not in passed_session_actions:
+                passed_session_actions[passed_transition["session_action"]] = []
+            passed_session_actions[passed_transition["session_action"]].append({"timeout_setting": passed_transition["session_timeout"], "next_nodes": next_node_name})
         dialog_logger.debug(f"passed transitions' settings for handling of session for node <{id(active_node)}><{active_node.graph_node.id}> are <{passed_session_actions}>")
 
         section_exceptions = []
 
-        # first pass is just checking info
+        # first pass is setting up active nodes and sessions for callbacks to work on
         callbacks_list:list[typing.Tuple[BaseType.BaseNode, list]] = []
         resulting_close_flags = {"node":False, "session":False}
-        for passed_transition in passed_transitions:
-            session = None
-            yaml_session_setting = passed_transition[2] if isinstance(passed_transition[2], str) else list(passed_transition[2].keys())[0]
-            session_timeout = None if isinstance(passed_transition[2], str) else list(passed_transition[2].values())[0]
-            if yaml_session_setting == "start" or (yaml_session_setting == "chain" and active_node.session is None):
-                dialog_logger.info(f"starting session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{passed_transition[0]}>")
-                if session_timeout is not None:
-                    session = SessionData.SessionData(timeout_duration=timedelta(seconds=session_timeout))
-                else:
-                    session = SessionData.SessionData()
-                dialog_logger.debug(f"session debugging, started new session, id is <{id(session)}>")
-            elif yaml_session_setting in ["chain", "section"] and active_node.session is not None:
-                if session_timeout is not None:
-                    old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session.timeout is not None else None
-                    active_node.session.set_TTL(timeout_duration=timedelta(seconds=session_timeout))
-                    self.update_timeout_tracker(active_node.session, old_session_timeout)
-                # None means no changes
-                session = active_node.session
-            elif yaml_session_setting != "end":
-                session = active_node.session
-            # what is session set to at this point:
-            # end always has session=None
-            # start always fresh session data
-            # chain can have fresh session or this node's which is none or existing
-            # section has this node's which is none or existing
+        for next_node_name, passed_transition in passed_transitions.items():
+            for i in range(passed_transition["count"]):
+                session = None
+                yaml_session_setting = passed_transition["session_action"]
+                session_timeout = passed_transition["session_timeout"]
+                if yaml_session_setting == "start" or (yaml_session_setting == "chain" and active_node.session is None):
+                    dialog_logger.info(f"starting session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{next_node_name}>")
+                    if session_timeout is not None:
+                        session = SessionData.SessionData(timeout_duration=timedelta(seconds=session_timeout))
+                    else:
+                        session = SessionData.SessionData()
+                    dialog_logger.debug(f"session debugging, started new session, id is <{id(session)}>")
+                elif yaml_session_setting in ["chain", "section"] and active_node.session is not None:
+                    if session_timeout is not None:
+                        old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session.timeout is not None else None
+                        active_node.session.set_TTL(timeout_duration=timedelta(seconds=session_timeout))
+                        self.update_timeout_tracker(active_node.session, old_session_timeout)
+                    # None means no changes
+                    session = active_node.session
+                elif yaml_session_setting != "end":
+                    session = active_node.session
+                # what is session set to at this point:
+                # end always has session=None
+                # start always fresh session data
+                # chain can have fresh session or this node's which is none or existing
+                # section has this node's which is none or existing
 
-            next_node = self.graph_node_indexer.get_ref(passed_transition[0]).activate_node(session)
-            if "section" in passed_session_actions and session is not None:
-                # not the complete list of all nodes created. might miss sone when ending session, might have extra when starting session but at least covers all that would be in the session about to be sectioned
-                section_exceptions.append(next_node)
-            execution_reporting.info(f"activated next node, is of graph node <{passed_transition[0]}>, id'd <{id(next_node)}>")
-            if yaml_session_setting != "end" and session is not None:
-                # only end doesn't want node added to session
-                dialog_logger.info(f"adding next node to session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{passed_transition[0]}>")
-                session.add_node(next_node)
-                dialog_logger.info(f"session debugging, session being chained. id <{id(session)}>, adding node <{id(next_node)}><{next_node.graph_node.id}> to it, now node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
-            
-            close_flag = passed_transition[3]
-            resulting_close_flags["node"] = resulting_close_flags["node"] or ("node" in close_flag)
-            resulting_close_flags["session"] = resulting_close_flags["session"] or ("session" in close_flag)
-            callbacks_list.append((next_node, passed_transition[1]))
+                next_node = self.graph_node_indexer.get_ref(next_node_name).activate_node(session)
+                if "section" in passed_session_actions and session is not None:
+                    # not the complete list of all nodes created. might miss sone when ending session, might have extra when starting session but at least covers all that would be in the session about to be sectioned
+                    section_exceptions.append(next_node)
+                execution_reporting.info(f"activated next node, is of graph node <{next_node_name}>, copy number <{i + 1}> id'd <{id(next_node)}>")
+                if yaml_session_setting != "end" and session is not None:
+                    # only end doesn't want node added to session
+                    dialog_logger.info(f"adding next node to session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{next_node_name}>")
+                    session.add_node(next_node)
+                    dialog_logger.info(f"session debugging, session being chained. id <{id(session)}>, adding node <{id(next_node)}><{next_node.graph_node.id}> to it, now node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
+                
+                close_flag = passed_transition["close_flags"]
+                resulting_close_flags["node"] = resulting_close_flags["node"] or ("node" in close_flag)
+                resulting_close_flags["session"] = resulting_close_flags["session"] or ("session" in close_flag)
+                callbacks_list.append((next_node, passed_transition["actions"], passed_transition["count"]))
 
         #NOTE: for multiple passed transitions the node data could be different at the start of each transition action's call
         for callback_settings in callbacks_list:
             # don't need to keep track of old node timeout because this is a new active node.
+            section_data = self.generate_action_section_data({"copy":callback_settings[2]})
             old_session_timeout = copy.deepcopy(callback_settings[0].session.timeout) if callback_settings[0].session is not None and callback_settings[0].session.timeout is not None else None
-            await self._action_list_runner(active_node, event, callback_settings[1], POSSIBLE_PURPOSES.TRANSITION_ACTION, goal_node=callback_settings[0])
+            await self._action_list_runner(active_node, event, callback_settings[1], POSSIBLE_PURPOSES.TRANSITION_ACTION, goal_node=callback_settings[0], section_data=section_data)
             if callback_settings[0].session is not None and id(callback_settings[0].session) in self.timeouts_tracker:
                 self.update_timeout_tracker(callback_settings[0].session, old_session_timeout)
             await self._track_new_active_node(callback_settings[0], event)
@@ -737,6 +762,14 @@ class DialogHandler():
     ################################################################################################
     ################################################################################################'''
 
+    def generate_action_section_data(self, addons=None):
+        section_data = {"close_node": False, "close_session": False}
+        if addons:
+            if isinstance(addons, dict):
+                section_data.update(addons)
+        return section_data
+
+
     async def _action_list_runner(self, active_node:BaseType.BaseNode, event, action_list, purpose: POSSIBLE_PURPOSES, goal_node=None, section_data=None):
         '''helper for running a section of action callbacks.
 
@@ -748,7 +781,7 @@ class DialogHandler():
         dict results from callbacks that would affect system. currently holds `close_node` and `close_session`, both default to False'''
         if section_data is None:
             # object meant for temp just passing data to rest of functions in this section.
-            section_data = {"close_node": False, "close_session": False}
+            section_data = self.generate_action_section_data()
         for callback in action_list:
             if isinstance(callback, str):
                 # is just function name, no parameters
@@ -758,7 +791,19 @@ class DialogHandler():
                 value = callback[key]
                 await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, values=value, callb_section_data=section_data)
 
-        return {"close_node": section_data["close_node"], "close_session": section_data["close_session"]}
+        return section_data
+    
+    def _counter_runner(self, yaml_count, active_node:BaseType.BaseNode, event, action_list, purpose: POSSIBLE_PURPOSES):
+        for callback in action_list:
+            if isinstance(callback, str):
+                # is just function name, no parameters
+                self._run_func(callback, purpose, active_node, event, callb_section_data=yaml_count)
+            else:
+                key = list(callback.keys())[0]
+                value = callback[key]
+                self._run_func(key, purpose, active_node, event, values=value, callb_section_data=yaml_count)
+        return yaml_count
+
 
     def _filter_list_runner(self, active_node:BaseType.BaseNode, event, filter_list, purpose:POSSIBLE_PURPOSES,
                            goal_node=None, operator="and", section_data=None):
@@ -961,4 +1006,3 @@ class DialogHandler():
         if len(self.active_node_cache) > 0:
             dialog_logger.warning(f"destrucor for handler. id'd <{id(self)}> sanity checking any memory leaks, may not be major thing" +\
                                   f"nodes left: <{self.active_node_cache.cache.items()}>")
-

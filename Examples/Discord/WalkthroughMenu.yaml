@@ -29,14 +29,14 @@ nodes:
          - clicked_this_menu
         schedule_close: node
         transitions:
-          - node_names: question1
+          - node_names: 
+              question1: 1
             session_chaining: 
               start
             transition_filters:
               - button_is: begin
             transition_actions:
               - session_link_user
-              - transfer_menu
 
   - id: question1
     type: Base
@@ -63,7 +63,8 @@ nodes:
          - clicked_this_menu
          - is_session_user
         transitions:
-          - node_names: question2
+          - node_names: 
+              - question2
             session_chaining: section
             transition_filters:
               - button_is: [sneep, snorp]
