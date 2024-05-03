@@ -467,6 +467,8 @@ class DialogHandler():
         
         Parameters:
         ---
+        active_node - `BaseType.BaseNode`
+            the active node instance to run events on. start callbacks runs when this isn't being tracked by handler yet
         version - `str`
             "start", "close", or None. specifies which list to run: start setup for event, close callbacks, or regular for given event
             
@@ -537,11 +539,13 @@ class DialogHandler():
                 count_results = self._counter_runner(copy.deepcopy(transition_node_counts), active_node,event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
             else:
                 count_results = transition_node_counts
+            dialog_logger.debug(f"counters finished executing for transition <{transition_ind}>, counts are {count_results}, to loop through <{count_results.keys()}>")
             # transition actions techinically can cause changes to stored session data.
             # Want to keep filters for all transitions somewhat similar by making them run on node at same state with same stored data,
             # so need a clear separation between filtering and callback stages. Running filters then actions for a transition then doing same fot
             # next transition could cause changes to the filters in later transitions
-            for node_name in transition_node_counts.keys():
+            for node_name in count_results.keys():
+                dialog_logger.debug(f"transition <{transition_ind}>, node <{node_name}> running filters")
                 if node_name not in self.graph_node_indexer:
                     execution_reporting.warning(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> transition won't work, goal node doesn't exist. transition indexed <{transition_ind}>")
                     continue
@@ -552,24 +556,34 @@ class DialogHandler():
                         filter_res = self._filter_list_runner(active_node, event, transition["transition_filters"], POSSIBLE_PURPOSES.TRANSITION_FILTER, node_name)
                         # transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
                         if isinstance(filter_res, bool) and filter_res:
-                            passed_transitions[node_name] = {"count": count_results[node_name],
-                                                             "actions": transition["transition_actions"] if "transition_actions" in transition else [],
-                                                             "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
-                                                                                if "session_chaining" in transition else "end",
-                                                             "session_timeout": None if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
-                                                             "close_flags": transition_close_flag,
-                                                             }
+                            execution_reporting.debug("filter list result was true, adding tracking")
+                            to_add = {
+                                "count": count_results[node_name],
+                                "actions": transition["transition_actions"] if "transition_actions" in transition else [],
+                                "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
+                                                if "session_chaining" in transition else "end",
+                                "session_timeout": None if "session_chaining" not in transition or isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
+                                "close_flags": transition_close_flag,
+                            }
+                            passed_transitions[node_name] = to_add
+                            dialog_logger.debug(f"transition indexed <{transition_ind}> tracking is <{passed_transitions[node_name]}>")
                     except Exception as e:
                         execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>. assuming skip")
                         dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>, details {e}")
                 else:
-                    passed_transitions[node_name] = {"count": count_results[node_name],
-                                                     "actions": transition["transition_actions"] if "transition_actions" in transition else [],
-                                                     "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
-                                                                    if "session_chaining" in transition else "end",
-                                                     "session_timeout": None if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
-                                                     "close_flags": transition_close_flag,
-                                                    }
+                    dialog_logger.debug(f"transition indexed <{transition_ind}> does not have filters, auto pass")
+                    to_add = {
+                        "count": count_results[node_name],
+                        "actions": transition["transition_actions"] if "transition_actions" in transition else [],
+                        "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
+                                    if "session_chaining" in transition else "end",
+                        "session_timeout": None if "session_chaining" not in transition or isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
+                        "close_flags": transition_close_flag
+                    }
+                    passed_transitions[node_name] = to_add
+                    dialog_logger.debug(f"transition indexed <{transition_ind}> tracking is <{passed_transitions[node_name]}>")         
+            dialog_logger.debug(f"checking transitions got to end of transition <{transition_ind}> node names")
+        dialog_logger.debug(f"passed transitions are <{passed_transitions.keys()}>")
         return passed_transitions
 
     async def _run_transitions_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
@@ -662,7 +676,7 @@ class DialogHandler():
     async def _track_new_active_node(self, active_node:BaseType.BaseNode, event):
         '''adds the given active node to handler's internal tracking. after this, node is fully considered being managed by this handler.
         adds node to handler's list of active nodes its currently is waiting on, does node actions for entering node, adds info about what events node
-        is waiting for'''
+        is waiting for, and adds trackers for timeouts'''
         #TODO: fine tune id for active nodes
         dialog_logger.info(f"dialog handler id'd <{id(self)}> adding node <{id(active_node)}><{active_node.graph_node.id}> to internal tracking and running node callbacks")
         active_node.activate()
@@ -907,6 +921,8 @@ class DialogHandler():
 
     def create_timeout_tracker(self,
                                timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData]):
+        '''create task object that is responsible for firing tieout event on given node or session.
+        Handler will keep track of the task'''
         if timeoutable.timeout is None:
             return
         if isinstance(timeoutable, BaseType.BaseNode):
@@ -924,6 +940,8 @@ class DialogHandler():
     def update_timeout_tracker(self,
                                timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData],
                                old_timeout):
+        '''updates internal tracking if there are changes to timeout that would cause significant difference.
+        timeout shortened, creates new task if existing was sleeping. timeout removed, removes tracking'''
         if timeoutable.timeout is not None:
             # there is a timeout on item
             if old_timeout is None:
@@ -937,6 +955,9 @@ class DialogHandler():
                 # there is old timeout, only case we need to deal with is shortened timeout
                 existing_task = self.timeouts_tracker[id(timeoutable)]
                 if existing_task.state == TASK_STATE.WAITING:
+                    # only when waiting might wake up really late so cancel and recreate
+                    # don't want to disturb if in middle of event handling, plus there's no changes if
+                    #   timeout was updated to before old and already handling
                     existing_task.cancel()
                     self.create_timeout_tracker(timeoutable)
         else:
@@ -944,6 +965,11 @@ class DialogHandler():
             if old_timeout is not None:
                 # used to have a timeout, if it was tracked that is not needed anymore
                 if id(timeoutable) in self.timeouts_tracker:
+                    existing_task = self.timeouts_tracker[id(timeoutable)]
+                    if existing_task.state == TASK_STATE.WAITING:
+                        # only when waiting might wake up really late so cancel and recreate
+                        # don't want to disturb if in middle of event handling
+                        existing_task.cancel()
                     del self.timeouts_tracker[id(timeoutable)]
 
     async def single_node_timeout_handler(self, node:BaseType.BaseNode):
@@ -1004,5 +1030,6 @@ class DialogHandler():
 
     def __del__(self):
         if len(self.active_node_cache) > 0:
+            printing_active = ["<"+str(x)+"><"+node.graph_node.id+">" for x, node in self.active_node_cache.cache.items()]
             dialog_logger.warning(f"destrucor for handler. id'd <{id(self)}> sanity checking any memory leaks, may not be major thing" +\
-                                  f"nodes left: <{self.active_node_cache.cache.items()}>")
+                                  f"nodes left: <{printing_active}>")

@@ -39,7 +39,7 @@ What's it capable of?
 
 
 # Running Example Dialog
-Included in the Examples are a yaml definition for an interactive QnA dialog done through Discord, showcase of how to integrate a DialogHandler with a discord bot, and examples of how to customize behaviors through the callback functions - in this case how to control a discord bot. <br/>
+Included in the example bot are a yaml definition for an interactive QnA dialog done through Discord, showcase of how to integrate a DialogHandler with a discord bot, and examples of how to customize behaviors through the callback functions - in this case how to control a discord bot. <br/>
 
 Discord requires a token for bot to log in, and this project reads the token from a config.json located in the root of the project. After cloning repo, create a `config.json` file. Get bot token from dev portal and add it to file like this:
 ```
@@ -108,7 +108,7 @@ required fields and data format for the system to parse nodes in version 3.6.0
   * **filters** -- optional list of functions that take the current node and event to determine if the incoming event should trigger a response from the node. 
   * **actions** -- optional list of functions that take the current node and event, and which effectively is how the node responds to the event. this is the main section for changing node data due to event
   * **schedule_close** -- optional field whose value is one of "node", "session", or ["node", "session"]. setting for whether or not this node and/or session data should be closed and deleted after the event on this node is handled. This setting also appearts in the transition settings. see that for how they work together
-  * **transitions** -- optional list nested in each event type that describes settings for how to make a transition to next node. When an event happens all the transitions listed under that event type are filtered every time. Each item is a single transition with settings:
+  * **transitions** -- optional list nested in each event type that describes settings for how to transition to further node(s). When an event happens all the transitions listed under that event type are filtered every time. Each item is a single transition with settings:
     * **node_names** -- required identifier of next node to go to or a list of multiple node identifiers. list is handy when the process to handle transitioning to multiple nodes is the same.
     * **transition_filters** -- an optional list of functions that takes the current node, event, and the name of the next node to decide if this specific event triggers this transition to happen
     * **transition_actions** -- optional list of functions that takes the current node, event, and next node object to handle the process of transitioning. This is the main section for changing node data based on transtion or handling any special cases of transferring data to next node.
@@ -123,7 +123,7 @@ only Functions you trust should be loaded into the handler since they can do any
 Node Life cycle 
 
 ## Setting up handlers
-There's already a written out example in `Examples/Discord/ExampleBot.py` for some of the details! 
+There's already a written out example in `Extensions/Discord/ExampleBot.py` for some of the details! 
 
 One thing the example does not have is if you are using custom Node types, these need to be registered before loading yaml so the parser can recognize them. Registration only needs to be done once per type, but double calls won't crash and burn. The registration call can be placed globally or in a function. The syntax is `register_node_type(moduleName, type_name)`. Registered node types will technically avialable to all handlers created, and there currently are no capabilities to limit types a handler can get from parsing. 
 

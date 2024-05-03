@@ -1,0 +1,346 @@
+nodes:
+  - id: "welcome"
+    type: Discord
+    version: "1.0.0"
+    graph_start:
+      message_command:
+      slash_command:
+    actions:
+      - send_message:
+          menu_name: welcome
+          ping_with_reply: True
+          message:
+            content: Welcome to the Testing Quiz!
+            components:
+              - custom_id: begin
+                type: Button
+                style: success
+                label: begin?
+              - custom_id: stop
+                type: Button
+                style: red
+                label: no.
+    close_actions:
+      - clear_buttons:
+          closed: test ended, please restart
+          timeout: Timed out, please retry?
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu: [welcome]
+        transitions:
+          - node_names: 
+              ready_1: 1
+            session_chaining: 
+              start: -1
+            transition_filters:
+              - button_is: begin
+            transition_actions:
+              - session_link_user: goal_session
+
+  # must do action five times
+  # keeps editing message and swapping buttons, select the right button each time
+  # quick time
+  # random chance to pass
+  # memory
+  # must reply
+  # send to dms and get answer there
+  # must wait certain time before clicking button
+  # branching choices dependent on previous
+  # group of tasks do any order
+  # multiple messages in a node
+  # click anything
+  # play rock paper scissors
+
+  - id: ready_1
+    type: Discord
+    version: "1.0.0"
+    actions:
+      - send_message:
+          menu_name: ready_1
+          ping_with_reply: False
+          message:
+            content: "please confirm you read the terms and conditions on testing procedure"
+            components:
+              - custom_id: terms
+                type: Button
+                label: terms
+              - custom_id: confirm
+                type: Button
+                style: success
+                label: "yes"
+              - custom_id: stop
+                type: Button
+                label: no.
+    close_actions:
+      - remove_message
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu
+         - is_session_user
+        transitions:
+          - node_names:
+              - loading
+            session_chaining: section
+            transition_filters:
+              - button_is: [confirm]
+          - node_names: terms_and_conditions
+            session_chaining: chain
+            transition_filters:
+              - button_is: terms
+          - node_names: test_canceled
+            schedule_close: session
+            transition_filters:
+              - button_is: stop
+      timeout:
+        transitions:
+          - node_names: timed_out_cancel
+            schedule_close: session
+            transition_actions:
+              - transfer_menus
+              - rename_menu:
+                  target: next_node
+                  from: question1
+                  to: timed_out_notice
+
+  - id: terms_and_conditions
+    type: Discord
+    version: "1.0.0"
+    close_actions:
+      - remove_message
+    actions:
+      - send_message:
+          menu_name: terms
+          ping_with_reply: False
+          message:
+            content: |
+              this test will run through basic procedures and dry run possibilities. Scores are meant for your eyes only. 
+              this bot is not responsible for what you answer.
+              This is mostly a joke quiz
+
+  - id: test_canceled
+    type: Discord
+    version: "1.0.0"
+    actions:
+      - send_message:
+          menu_name: test_canceled_notice
+          message:
+            content: |
+              test closed.
+
+  - id: timed_out_cancel
+    type: Discord
+    version: "1.0.0"
+    actions:
+      - edit_message:
+          menu_name: timed_out_notice
+          message:
+            content: |
+              test failed, no responses within allotted time.
+
+  - id: loading
+    type: Discord
+    version: "1.0.0"
+    TTL: 1
+    close_actions:
+      - remove_message
+    actions:
+      - send_message:
+          menu_name: loading
+          message:
+            content: loading...
+      - save_data:
+          key: counter
+          value: 0
+          locations: node
+    events:
+      timeout:
+        actions:
+          - update_timeout:
+              objects: current_node
+              seconds: 1
+          - increment_value:
+              location: node
+              key: counter
+              value: 1
+        transitions:
+          - node_names: question1
+            transition_filters:
+              - simple_compare:
+                  variable: node.counter
+                  operator: ">="
+                  value: 3
+            transition_actions:
+              - transfer_menus
+              - rename_menu:
+                  target: next_node
+                  from: loading
+                  to: question1
+            session_chaining: section
+    
+  - id: question1
+    type: Discord
+    version: "1.0.0"
+    actions:
+      - edit_message:
+          menu_name: question1
+          ping_with_reply: True
+          message:
+            content: "question 1"
+            components:
+              - label: "sneep"
+                custom_id: "sneep"
+                type: Button
+              - label: "snorp"
+                custom_id: "snorp"
+                type: Button
+              - label: "help"
+                custom_id: "help1"
+                type: Button
+    close_actions:
+      - remove_message
+    events:
+      button_click:
+        filters:
+         - clicked_this_menu
+         - is_session_user
+        transitions:
+          - node_names: 
+              - question2
+            session_chaining: section
+            transition_filters:
+              - button_is: [sneep, snorp]
+            transition_actions:
+              - save_survey_answer:
+                  survey_name: testing_quiz
+                  key: question1
+                  save_locations: current_session
+              - transfer_menus
+              - rename_menu:
+                  target: next_node
+                  from: question1
+                  to: question2
+          - node_names: help1
+            session_chaining: chain
+            transition_filters:
+              - button_is: help1
+      timeout:
+        transitions:
+          - node_names: timed_out_cancel
+            schedule_close: session
+            transition_actions:
+              - transfer_menus
+              - rename_menu:
+                  target: next_node
+                  from: question1
+                  to: timed_out_notice
+
+  - id: help1
+    type: Discord
+    version: "1.0.0"
+    close_actions:
+      - remove_message
+    actions:
+      - send_message:
+          menu_name: help1
+          message:
+            content: "Yes, make a choice"
+
+  - id: question2
+    type: Discord
+    version: "1.0.0"
+    close_actions:
+      - remove_message
+    actions:
+      - edit_message:
+          menu_name: question2
+          ping_with_reply: False
+          message:
+            content: "ok question 2, reply with text"
+            components:
+              - label: "help"
+                custom_id: "help2"
+                type: Button
+    events:
+      message:
+        filters:
+          - is_reply
+          - is_session_user
+        transitions:
+          - node_names: question3
+            session_chaining: section
+            transition_actions:
+              - save_survey_answer:
+                  survey_name: testing_quiz
+                  key: question2
+                  save_locations: current_session
+      button_click:
+        filters:
+         - clicked_this_menu
+         - is_session_user
+        transitions:
+          - node_names: help2
+            session_chaining: chain
+            transition_filters:
+              - button_is: help2
+
+  - id: question3
+    type: Discord
+    version: "1.0.0"
+    close_actions:
+      - remove_message
+    actions:
+      - send_message:
+          menu_name: question3
+          ping_with_reply: False
+          message:
+            content: "ok choice 3, ahajdljigrijrgjlihlthljthlj"
+            components:
+              - custom_id: q3_select
+                type: SelectMenu
+                options:
+                  - label: asdf
+                    description: don't know what else
+                  - label: qwerty
+                    description: is this your keyboard?
+                  - label: lorem Ipsum
+                    description: filler
+    events:
+      select_menu:
+        filters:
+          - clicked_this_menu
+          - is_session_user
+        transitions:
+          - node_names: finishing
+            session_chaining: section
+            transition_actions:
+              - save_survey_answer:
+                  survey_name: testing_quiz
+                  key: question3
+                  save_locations: current_session
+
+  - id: finishing
+    type: Discord
+    version: "1.0.0"
+    TTL: 300
+    close_actions:
+      - remove_message
+    actions:
+      - report_survey_ansers:
+          survey_name: testing_quiz
+      - update_timeout:
+          objects: current_session
+          seconds: 300
+      
+  - id: help2
+    type: Discord
+    version: "1.0.0"
+    close_actions:
+      - remove_message
+    actions:
+      - send_message:
+          menu_name: help2
+          ping_with_reply: False
+          message:
+            content: "pls save"

@@ -1,4 +1,5 @@
 # edit message schema, to update this, better to copy from send message schema and delete the redirect portion
+$id: https://nodetion/extensions/discord/schemas/message
 type: object
 properties:
   message:
@@ -52,44 +53,44 @@ properties:
                   required: ["label"]
                   unevaluatedProperties: false
           else:
-            if: 
-              properties:
-                type:
-                  const: "Button"
-            then:
-              properties:
-                label:
-                  type: string
-                disabled:
-                  type: boolean
-                url:
-                  type: string
-                emoji:
-                  type: string
-                row:
-                  type: integer
-                style:
-                  type: string
-                  enum: ["primary", "secondary", "success", "danger", "link", "blurple", "grey", "gray", "green", "red", "url"]
-      embed:
-        type: object
-        properties:
-          fields:
-            type: array
-            items:
-              type: object
-              properties:
-                name:
-                  type: string
-                value:
-                  type: string
-                inline:
-                  type: boolean
-              unevaluatedProperties: false
+            properties:
+              label:
+                type: string
+              disabled:
+                type: boolean
+              url:
+                type: string
+              emoji:
+                type: string
+              row:
+                type: integer
+              style:
+                type: string
+                enum: ["primary", "secondary", "success", "danger", "link", "blurple", "grey", "gray", "green", "red", "url"]
+      embeds:
+        type: array
+        items:
+          type: object
+          properties:
+            fields:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  value:
+                    type: string
+                  inline:
+                    type: boolean
+                unevaluatedProperties: false
+      attachments:
+        type: array
+        items: 
+          type: string
+      stickers:
+        type: array
+        items: 
+          type: integer
     unevaluatedProperties: false
-  use_reply:
-    type: string
-    enum: ["ping", "no_ping"]
-  menu:
-    type: boolean
 unevaluatedProperties: false

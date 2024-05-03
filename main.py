@@ -2,9 +2,10 @@ import json
 
 import discord
 from discord.ext import commands
-from Examples.Discord.ExampleBot import SimpleBot
+from Extensions.Discord.ExampleBot import SimpleBot
 
 intents = discord.Intents.default()
+intents.members = True
 intents.message_content = True
 
 bot = SimpleBot(command_prefix="$", intents=intents)
@@ -19,7 +20,7 @@ async def menu(ctx):
 
 @bot.command()
 async def reload_menu(ctx):
-    bot.main_menu_handler.reload_files(["Examples/Discord/WalkthroughMenu.yaml"])
+    bot.main_menu_handler.reload_files(["Extensions/Discord/WalkthroughMenu.yaml"])
     await ctx.channel.send("reloaded!")
 
 f = open("./config.json")
