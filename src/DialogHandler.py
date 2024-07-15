@@ -77,14 +77,14 @@ class DialogHandler():
         self.graph_node_indexer = Cache.MultiIndexer(
                 cache=graph_nodes,
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("type", "TYPE"),
-                    Cache.FieldValueIndex("next_nodes", "next_nodes")
+                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: x.TYPE),
+                    Cache.FieldValueIndex("next_nodes", keys_value_finder=lambda x: x.indexer(["next_nodes"])[1])
                 ]
         )
         '''maps the string node id from yaml to graph node object.'''
         dialog_logger.debug(f"dialog handler <{id(self)}> initializing with GraphNode cache <{id(self.graph_node_indexer.cache)}> with <{len(self.graph_node_indexer.cache)}> nodes registered")
         self.functions_cache = Cache.MultiIndexer(cache=functions, input_secondary_indices=[
-                Cache.FieldValueIndex("sections", "permitted_purposes")
+                Cache.FieldValueIndex("sections", keys_value_finder=lambda x: x["permitted_purposes"])
             ]
         )
         '''store of functions this handler is allowed to call. other handlers linking to same list is ok and on dev to handle.
@@ -92,9 +92,9 @@ class DialogHandler():
 
         self.active_node_cache = Cache.MultiIndexer(
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("graph_node", "graph_node.id"),
-                    Cache.FieldValueIndex("event_forwarding", "graph_node.events"),
-                    Cache.ObjContainsFieldIndex("session", "session")
+                    Cache.FieldValueIndex("graph_node", keys_value_finder=lambda x: x.graph_node.id),
+                    Cache.FieldValueIndex("event_forwarding", keys_value_finder=lambda x: list(x.graph_node.events.keys())),
+                    Cache.ObjContainsFieldIndex("session", keys_value_finder=lambda x: x.session)
                 ]
         )
         '''store for all active nodes this handler is in charge of handling events on. is mapping of unique id to a dictionary holding active node object and handler data for it'''
@@ -488,7 +488,7 @@ class DialogHandler():
         
         old_node_timeout = copy.deepcopy(active_node.timeout) if active_node.timeout is not None else None
         old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session is not None and active_node.session.timeout is not None else None
-        before_callbacks_keys = self.active_node_cache.get_item_trackers(id(active_node))
+        before_callbacks_keys = self.active_node_cache.get_all_secondary_keys(id(active_node))
         try:
             action_results = await self._action_list_runner(active_node, event, callbacks, POSSIBLE_PURPOSES.ACTION)
         except Exception as e:

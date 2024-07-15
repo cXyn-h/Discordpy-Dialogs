@@ -70,3 +70,6 @@ def test_delete_secondary_miss():
     assert "One" in c.data
     assert c.secondary_indices["val1"].pointers == {5: set(["Two"]), 3: set(["One"])}
     assert c.secondary_indices["val2"].pointers == {2: set(["Two", "One"]), "A": set(["Two"]), 1: set(["One"])}
+
+def test_clear():
+    '''test clear clears all data and indices'''

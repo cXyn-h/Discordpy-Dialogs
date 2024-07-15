@@ -9,6 +9,7 @@ import copy
 from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
 import src.utils.Cache as Cache
+import src.utils.DotNotator as DotNotator
 
 class BaseGraphNode:
     VERSION = "3.8.0"
@@ -516,8 +517,12 @@ required: ["id"]
             delattr(cls, "PARSED_SCHEMA")
 
     def indexer(self, keys):
+        '''custom override function for dot parser for this class for the purpose of indexing. Adds some custom handling for how to index by functions and 
+        next nodes'''
         result_keys = set()
         if keys[0] == "functions":
+            # when specifying index by functions do it for all functions used, aka all sections of functions
+            # step 1 is gathering all sections
             action_lists = [self.get_callbacks(), self.get_close_callbacks()]
             if self.graph_start is not None:
                 for event_type, settings in self.graph_start.items():
@@ -539,6 +544,7 @@ required: ["id"]
                         if "transition_actions" in transition_settings:
                             action_lists.append(transition_settings["transition_actions"])
 
+            # after gathering all functions, parse for function name
             for action_list in action_lists:
                 for action in action_list:
                     if isinstance(action, dict):
@@ -558,7 +564,7 @@ required: ["id"]
                             for next_node in transition_settings["node_names"]:
                                 result_keys.add(next_node)
             return [], list(result_keys)
-        return None
+        return [], DotNotator.parse_dot_notation(keys, self, custom_func_name="indexer")
 
 class BaseNode:
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:

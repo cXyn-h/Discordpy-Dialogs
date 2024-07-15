@@ -10,6 +10,11 @@ from src.utils.Enums import CLEANING_STATE
 import logging
 import sys
 
+import src.utils.DotNotator as DotNotator
+
+# TODO: Cache with cleaning included?
+# TODO: adding without key specified? UUIDS?
+
 cachev2_logger = logging.getLogger('dev-Cachev2')
 if not cachev2_logger.hasHandlers():
     logging_handler = logging.StreamHandler(sys.stdout)
@@ -30,66 +35,83 @@ cleaning_logger.setLevel(logging.INFO)
 #   and stop dealing with nested dicts and having to check each layer exists when trying to do anything with it
 
 class AbstractIndex:
-    '''all methods in this need to be overridden. Indices should manage its own way of storing mapping of its secondary keys to the primary keys.
-    Index will need to be added to a `MultiIndexer` object to receive data change events. `MultiIndexer` will notify this index of data changes through the
-    `add_item`, `remove_item`, and `set_item` callbacks.'''
+    '''
+    Template and parent class for custom secondary indices for MultiIndexer class to use. Custom index must be descendent of this class for MultiIndexer to use it.
+    MultiIndexer informs Index of all changes to data. Indices are responsible for keeping secondary key mappings up to data with information it receives.
+    All methods in this class are for MultiIndexer to call into and are missing implementation that needs to be filled in children, see doc strings and other documents for info.
+    Indices removed from MultiIndex or never assigned to one will not update to changes in cache.
+    
+    Index should define and manage its own storage for mapping. It can store the actual object that is in cache, but is just expected to return primary keys that match the given secondary key.'''
     def __init__(self, name) -> None:
         self.name = name
 
     def get(self, key, default=None):
-        '''returns copy of list of primary keys that fit the given key in this index, or the default value if not found'''
-        pass
+        '''returns list of primary keys for items that fit the given secondary key in this index, or the default value if no primary keys are found'''
+        return default
     
     def clear(self):
-        '''clear data stored by index'''
+        '''clear all data stored by index'''
         pass
 
-    def get_item_secondary_keys(self, item):
-        '''find all secondary keys that this index would track for the given item. aka what secondary keys this index will use to refer to item'''
+    def get_item_secondary_keys(self, primary_key, item):
+        '''find all secondary keys that this index would have for the given item. aka what secondary keys this index will map to item
+        
+        Returns
+        ---
+        list of secondary keys that this secondary index would use, or empty list if no keys
+        '''
         return []
 
     def add_item(self, primary_key, item):
-        '''callback when item has been added to data stores under given primary key and needs to be added to index tracking.'''
+        '''callback when item has been added to data stores under given primary key and needs to be added to this index's tracking.'''
         pass
 
     def remove_item(self, primary_key, item):
-        '''callback when item under given primary key has been removed from data stores and index tracking also needs to update'''
+        '''callback when item under given primary key has been removed from data stores and index tracking also needs to remove secondary keys. Takes item that was removed as Index object doesn't have 
+        reference to cache to retrive that info'''
         pass
 
     def set_item_keys(self, primary_key, old_second_keys, item):
-        '''callback when item under given primary key has had its internal data updated. During a set, the index needs to be passed what secondary key 
-        data it should check and clean up. This method uses the secondary keys for this object before update'''
+        '''callback when item under given primary key has had its internal data updated. 
+        Index needs to be passed both the new data to find keys to be added, and old secondary keys to know what keys to remove since no other way to find data.'''
         pass
 
-    def _set_item_data(self, primary_key, old_item, item):
-        '''callback when item under given primary key has had its internal data updated. During a set, the index needs to be passed what secondary 
-        key data it should check and clean up. This method uses the whole object before update'''
-        return self.set_item_keys(primary_key, self.get_item_secondary_keys(old_item), item)
-
-
 class FieldValueIndex(AbstractIndex):
-    '''simple usable implementation of index. pass in period separated `column_name` to have it search for secondary keys in nested 
-    objects and dictionaries. if `column_name` points to list or dictionary, index uses list items and dictionary keys as the secondary keys.
-    add a function called `indexer` that returns keys or None if cannot handle to override this index's default behavior'''
-    def __init__(self, name, column_name:str) -> None:
+    '''simple usable implementation of index. Uses calculations based on the values stored inside entries to create secondary key(s). 
+    Allows a secondary key to map to multiple primary keys. For example: This is indexing a list of nodes that have a type field, this index can index by type so you can get a 
+    list of all nodes that are type A vs type B.
+    This class supports having multiple secondary keys for one primary key. For example: indexing nodes with a list of the names of actions, this can index by all action names so you can get
+    a list of all nodes that use that action.
+    This class takes a function as paramter keys_value_finder that finds the secondary keys for this index. Index expects it to take the item as parameter and return a list that will be used as secondary keys
+    and for whoever provides it to do error handling. It should return either None or empty list if no keys for this index. If not provided it uses the `DotNotator` to find the calue of the field with the name 
+    of the class'''
+    def __init__(self, name, keys_value_finder=None) -> None:
         super().__init__(name)
-        self.column_name = column_name
+        if keys_value_finder is None:
+            keys_value_finder=lambda item: self.backup_value_finder(item)
+        self.keys_value_finder = keys_value_finder
+        '''function for grabbing secondary keys to track by. Index expects it to take the item as parameter and return a list and handle errors. None or empty list if no keys for this index'''
         self.pointers:dict[typing.Hashable, set[typing.Hashable]] = {}
-        '''secondary key to set of primary keys that contain the secondary key as a value'''
+        '''maps secondary key to set of primary keys that contain the secondary key as a value'''
 
     def get(self, key, default=None):
-        return copy.deepcopy(self.pointers.get(key, default))
+        value = self.pointers.get(key, None)
+        if value is None:
+            return default
+        return list(value)
     
     def clear(self):
         self.pointers.clear()
 
     def _add_pointers(self, primary_key, secondary_keys):
+        '''helper for this class. adds tracking information to mapping'''
         for secondary_key in secondary_keys:
             if secondary_key not in self.pointers:
                 self.pointers[secondary_key] = set()
             self.pointers[secondary_key].add(primary_key)
 
     def _remove_pointers(self, primary_key, secondary_keys):
+        '''helper for this class, removes tracking information'''
         for secondary_key in secondary_keys:
             if secondary_key in self.pointers and primary_key in self.pointers[secondary_key]:
                 # prevent errors trying to remove something not in there
@@ -98,179 +120,119 @@ class FieldValueIndex(AbstractIndex):
                 del self.pointers[secondary_key]
 
     def add_item(self, primary_key, item):
-        self._add_pointers(primary_key, self.get_item_secondary_keys(item))
+        self._add_pointers(primary_key, self.get_item_secondary_keys(primary_key, item))
 
     def remove_item(self, primary_key, item):
-        self._remove_pointers(primary_key, self.get_item_secondary_keys(item))
+        self._remove_pointers(primary_key, self.get_item_secondary_keys(primary_key, item))
     
     def set_item_keys(self, primary_key, old_second_keys, item):
         self._remove_pointers(primary_key, old_second_keys)
         self.add_item(primary_key, item)
     
-    def get_item_secondary_keys(self, item):
-        # indexer method is meant as a way for objects to define how it wants to handle grabbing data for indexing for all or subset of keys when indexing is based on what data is contained within the object
-        #   input is a list of the keys to recursively search for
-        #   return format is None or a tuple of format: first is the list of remaining keys to recurse on, the second is the object to recurse in if there's still keys or the exact list of secondary keys to use if no more recursing is needed
-        #   inmplementation can override default search way and return the exact keys that are wanted. have to put `return [], <list of secondary keys>`
-        #   implementation can recurse a couple layers but not all the way. the function will continue to recurse at the point that was returned. 
-        #   implementation can ignore what was input and just not handle at all, return None
-        recurse_data = item
-        split_names = self.column_name.split(".")
-        should_skip_indexer = False
-        # part one is recursing to find where the column name points to, then part two sorting out what the keys are in that data
-        while len(split_names) > 0:
-            if hasattr(recurse_data, "indexer") and not should_skip_indexer:
-                # indexer method is meant as a way for objects to define how it wants to handle grabbing data for indexing for all or subset of keys when indexing is based on what data is contained within the object 
-                # try that first and if fails try the default ways
-                indexer_returned = recurse_data.indexer(copy.copy(split_names))
-                if indexer_returned is None:
-                    # something failed or can't handle keys. try default way of grabbing instead
-                    should_skip_indexer = True
-                    continue
-                remaining_keys, nested_obj = indexer_returned
-                if len(remaining_keys) == 0:
-                    # the custom indexer was able to take all keys aka found secondary keys and done. assuming and trusting indexer to find exactly what keys it needs in this case
-                    return nested_obj
-                if remaining_keys == split_names and recurse_data is nested_obj:
-                    # should return None if can't handle, and should never return self object and same keys ever, but putting check just in case to prevent infinite loops
-                    should_skip_indexer = True
-                    continue
-                recurse_data = nested_obj
-                split_names = remaining_keys
-            elif isinstance(recurse_data, dict):
-                # default way, when it is a dictionary get key
-                next_key = split_names.pop(0)
-                nested_data = recurse_data.get(next_key, None)
-                if nested_data is None:
-                    return []
-                recurse_data = nested_data
-            elif type(recurse_data) not in [list, bool, str, int, float, type(None)]:
-                # default way, when handling complex objects, try to get attribute
-                next_key = split_names.pop(0)
-                if next_key == "class":
-                    # maybe want to have things that are python defaults have custom search names? make it less dependent on language structure
-                    next_step_data = recurse_data.__class__.__name__
-                elif not hasattr(recurse_data, next_key):
-                    return []
-                else:
-                    next_step_data = getattr(recurse_data, next_key)
-                recurse_data = next_step_data
-            else:
-                # hit unrecursible type before finishing recursions
-                return []
-            should_skip_indexer = False
-
-        # reached the end of keys to search at so whatever data or object is left is where the keys are/inside, now do the default way of sorting through data to get keys.
+    def get_item_secondary_keys(self, primary_key, item):
+        value = self.keys_value_finder(item)
+        if value is None:
+            return []
+        return copy.deepcopy(value)
+    
+    def backup_value_finder(self, item):
+        '''default behavior for keys_value_finder - the function that finds list of secondary keys'''
+        found_object = DotNotator.parse_dot_notation_string(self.name, item, custom_func_name="indexer")
         result_keys = set()
-        if type(recurse_data) not in [dict, list, bool, str, int, float]:
+
+        if type(found_object) not in [dict, list, bool, str, int, float]:
             # found data is a complex object, probably some way to get keys but don't really have a default way so giving up. return blank
             return []
-        elif isinstance(recurse_data, list):
+        elif isinstance(found_object, list):
             # uses list items as keys. only grabs hashable items, shouldn't have non-hashables inside anyways
-            for item in recurse_data:
+            for item in found_object:
                 try:
                     result_keys.add(copy.deepcopy(item))
                 except:
                     pass
-        elif isinstance(recurse_data, dict):
+        elif isinstance(found_object, dict):
             # uses dict keys as keys. 
-            for item in recurse_data.keys():
+            for item in found_object.keys():
                 result_keys.add(copy.deepcopy(item))
         else:
             # data is a bool, int, str etc. primitive type and hashable
             try:
-                result_keys.add(recurse_data)
+                result_keys.add(found_object)
             except:
                 pass
         return list(result_keys)
     
 class ObjContainsFieldIndex(FieldValueIndex):
-    def __init__(self, name, column_name: str) -> None:
-        super().__init__(name, column_name)
+    '''another simple usable implementation of index. Indexes if certain fields or values exist inside entry.
+    Only indexes by two values in that case, `does` and `not` for if contains field with a filled in non-null value'''
+    def __init__(self, name, keys_value_finder) -> None:
+        super().__init__(name, keys_value_finder)
         self.pointers["does"] = set()
         self.pointers["not"] = set()
 
-    def get_item_secondary_keys(self, item):
-        # indexer method is meant as a way for objects to define how it wants to handle grabbing data for indexing for all or subset of keys when indexing is based on what data is contained within the object
-        #   input is a list of the keys to recursively search for
-        #   return format is None or a tuple of format: first is the list of remaining keys to recurse on, the second is the object to recurse in if there's still keys or the exact list of secondary keys to use if no more recursing is needed
-        #   inmplementation can override default search way and return the exact keys that are wanted. have to put `return [], <list of secondary keys>`
-        #   implementation can recurse a couple layers but not all the way. the function will continue to recurse at the point that was returned. 
-        #   implementation can ignore what was input and just not handle at all, return None
-        recurse_data = item
-        split_names = self.column_name.split(".")
-        should_skip_indexer = False
-        # part one is recursing to find where the column name points to, then part two sorting out what the keys are in that data
-        while len(split_names) > 0:
-            if hasattr(recurse_data, "indexer") and not should_skip_indexer:
-                # indexer method is meant as a way for objects to define how it wants to handle grabbing data for indexing for all or subset of keys when indexing is based on what data is contained within the object 
-                # try that first and if fails try the default ways
-                indexer_returned = recurse_data.indexer(copy.copy(split_names))
-                if indexer_returned is None:
-                    # something failed or can't handle keys. try default way of grabbing instead
-                    should_skip_indexer = True
-                    continue
-                remaining_keys, nested_obj = indexer_returned
-                if len(remaining_keys) == 0:
-                    # the custom indexer was able to take all keys aka found secondary keys and done. assuming and trusting indexer to find exactly what keys it needs in this case
-                    return ["does"]
-                if remaining_keys == split_names and recurse_data is nested_obj:
-                    # should return None if can't handle, and should never return self object and same keys ever, but putting check just in case to prevent infinite loops
-                    should_skip_indexer = True
-                    continue
-                recurse_data = nested_obj
-                split_names = remaining_keys
-            elif isinstance(recurse_data, dict):
-                # default way, when it is a dictionary get key
-                next_key = split_names.pop(0)
-                nested_data = recurse_data.get(next_key, None)
-                if nested_data is None:
-                    return ["not"]
-                recurse_data = nested_data
-            elif type(recurse_data) not in [list, bool, str, int, float, type(None)]:
-                # default way, when handling complex objects, try to get attribute
-                next_key = split_names.pop(0)
-                if next_key == "class":
-                    # maybe want to have things that are python defaults have custom search names? make it less dependent on language structure
-                    next_step_data = recurse_data.__class__.__name__
-                elif not hasattr(recurse_data, next_key):
-                    return ["not"]
-                else:
-                    next_step_data = getattr(recurse_data, next_key)
-                recurse_data = next_step_data
-            else:
-                # hit unrecursible type before finishing recursions
-                return ["not"]
-            should_skip_indexer = False
-
+    def get_item_secondary_keys(self, primary_key, item):
+        value = self.keys_value_finder(item)
+        if value is None:
+            return ["not"]
         return ["does"]
 
 class MultiIndexer:
-    '''class for tracking and updating secondary indices for entries'''
-    def __init__(self, cache:"typing.Union[dict, Cache]"=None, input_secondary_indices=[]) -> None:
+    '''The main utility class this file is designed to add.
+    Designed for tracking data objects where besides the key identifier(s), there also is a need to search or group by other 
+    data field(s) or extrapolated properties of the stored objects. This class manages and tries to keep secondary indices in sync with primary.
+
+    Object used for primary storage can be a dictionary or a subclass of Cache.
+    It is important to use MultiIndexer's `add_item` `remove_item` and 'set_item` for adding removing or changing items respetively to keep secondary indices up to date
+    with changes to items being stored. `reindex` helps if secondary indices are stale, and `get_all_secondary_keys` can be used when trying to set but have to do it on original object
+    
+    `MultiIndexer` keeps a primary mapping storage and secondary index objects. The built in functions for updating items in the cache automatically update secondary indices.
+    When querying secondary indices, expects them to return primary indices not the objects themselves
+    
+    The cache implementation defines what to do with actual object data. Most especially whether to return copies or not.'''
+    def __init__(self, cache:"typing.Optional[typing.Union[dict, Cache]]"=None, input_secondary_indices:"list[typing.Union[str, AbstractIndex]]"=None) -> None:
+        '''
+        Parameters
+        ---
+        * cache - `dict | Cache`
+            Either a regular python dictionary or subclass of the Cache class defined in this file, defaults to dictionary. 
+            MultiIndexer uses this as primary index and storage. Paased in object is given to MultiIndexer to manage, best not to
+            change data stored outside of MultiIndexer's provided accessors. Unless cache object overrides the behavior, MultiIndexer
+            get will return the object itself not a copy'''
         self.cache = cache if cache is not None else {}
-        '''cache also stands in for primary index'''
-        self.is_cache_set = cache is not None
         self.is_cache_obj = issubclass(self.cache.__class__, Cache)
         self.secondary_indices:dict[str, AbstractIndex] = {}
-        self.add_indices(*input_secondary_indices)
-        if len(self.cache) > 0:
-            self.reindex()
+
+        if input_secondary_indices:
+            self.add_indices(*input_secondary_indices)
 
     def set_cache(self, cache:"typing.Union[dict, Cache]"):
+        '''
+        tries to set the primary data cache MultiIndexer manages to the one passed in and reindexes. 
+        Only makes changes if cache is not None. Old one is ignored by MultiIndexer.
+        
+        Returns
+        ---
+        `boolean` whether or not it set cache and made changes'''
+        if cache is None:
+            return False
         self.cache = cache
-        self.is_cache_set = True
         self.is_cache_obj = issubclass(self.cache.__class__, Cache)
+        # indices should be up to date with cache so need to clean up
         self.reindex()
+        return True
 
     def add_indices(self, *input_secondary_indices):
+        '''
+        Adds the given indices passed in to the MultiIndexer object, then reindexes. Given indices are either created objects or a name of index with default behaviors.
+        Cannot add indices that aren't subclasses of AbstractIndex, Index has name of primary, or repeated index; warns and ignores if it hits these cases'''
+        added_index_names = []
         for index in input_secondary_indices:
             if type(index) is str:
                 # if string, assume name and build simplest most usable index
-                index = FieldValueIndex(index, index)
+                index = FieldValueIndex(index)
 
             if not issubclass(type(index), AbstractIndex):
-                cachev2_logger.warning(f"trying to add secondary index {index} but if of type that cache doesn't support")
+                cachev2_logger.warning(f"trying to add secondary index {index} but is of type that cache doesn't support")
                 continue
 
             if index.name == "primary":
@@ -279,14 +241,15 @@ class MultiIndexer:
             if index.name in self.secondary_indices:
                 cachev2_logger.warning(f"trying to add secondary index named {index.name} but that exists already. skipping")
                 continue
-
+            added_index_names.append(index.name)
             self.secondary_indices[index.name] = index
-
-        self.reindex()
+        self.reindex(index_names=added_index_names)
 
     def remove_indices(self, *index_names):
+        '''removes the indices with the given names from the MultiIndexer. Ignores if a name does not exist.'''
         for index_name in index_names:
-            del self.secondary_indices[index_name]
+            if index_name in self.secondary_indices:
+                del self.secondary_indices[index_name]
 
     def get_keys(self, key, index_name="primary", default=None) -> typing.Any:
         '''same as the `get` method: returns a list of the entries in cache that fit the given key and index, but this returns the primary keys of these entries.
@@ -318,19 +281,19 @@ class MultiIndexer:
         else:
             cachev2_logger.debug(f"getting data from index <{index_name}>")
             primary_keys = self.secondary_indices[index_name].get(key, default=None)
-            if primary_keys is None:
+            if primary_keys is None or primary_keys == []:
                 return default
-            return primary_keys
-        
+            return copy.deepcopy(primary_keys)
+
     def get(self, key, index_name="primary", default=None) -> typing.Any:
         '''same as the `get_keys` method: returns a list of the entries in cache that fit the given key and index, but this returns the entries' data itself.
         Always returns found data as a list, if nothing found returns value passed in under default. modifying objects directly may make indices stale, 
-        try to use the indexer's set method.
+        try to use the indexer's `set` method.
 
         Parameters
         ---
         * key - `Any`
-            key to use to find data
+            key to use to find data, can be primary or secondary key
         * index_name - `str`
             name of index to search for key in, defaults to "primary" index
         * default - `Any`
@@ -343,31 +306,50 @@ class MultiIndexer:
         '''
         cachev2_logger.debug(f"reporting, cache get passed key of <{key}> index of <{index_name}> default value of <{default}>")
 
+        # get all primary keys that fit the given index and key
         found_keys = self.get_keys(key=key, index_name=index_name, default=None)
         if found_keys is None:
+            # didn't find key, got the default value back
             return default
         else:
             result_list = []
             for primary_key in found_keys:
                 if primary_key in self.cache:
-                    # does this need to be copied before putting in? might be overhead
+                    # get actual item or copy let cache decide
                     result_item = self.cache.get(primary_key)
                     result_list.append(result_item)
                 else:
-                    # one of primary keys returned by index not actually stored, needs refresh
+                    # one of primary keys returned by index not actually stored
+                    if index_name == "primary" or index_name == "":
+                        # if primary index, something's wrong. Key was found once and now not. guess return not found
+                        return default
+                    # is a primary key from a secondary key, needs refresh cause it means index desynced
                     self.reindex(indices=[index_name])
                     return self.get(key=key, index_name=index_name, default=default)
             return result_list
         
     def get_ref(self, primary_key, default=None):
         '''returns the actual object stored. Modifying objects directly may make indices stale, 
-        try to use the indexer's set method. '''
+        try to use the indexer's set method instead of chaing object returned here. If still need to change, need to call `get_all_secondary_keys`
+        on object before any updates, make updates, and pass secondary keys from before updates to set call'''
         if self.is_cache_obj:
             return self.cache.get_ref(primary_key, default)
         else:
             return self.cache[primary_key]
         
     def add_item(self, primary_key, item, or_overwrite=False):
+        '''
+        adds one item under the primary key into cache and updates indices. If primary key already exists must check overwriting is ok as well.
+
+        Parameters
+        ---
+        * or_overwrite - `boolean`
+            same as add_item or_overwrite, controls if it is ok to overwrite an existing item, in which it calls set
+
+        Returns
+        ---
+        key of item just added or overwritten, none if it failed
+        '''
         if primary_key in self.cache:
             if or_overwrite:
                 return self.set_item(primary_key, item)
@@ -383,20 +365,42 @@ class MultiIndexer:
         return primary_key
     
     def add_items(self, entries:dict, or_overwrite=False):
+        '''
+        adds a bunch of entries into cache. check add_item for details on process
+
+        Parameters
+        ---
+        * entries - `dict`
+            all the entries to add to cache. each item's key becomes primary key in cache for the value
+        * or_overwrite - `boolean`
+            same as add_item or_overwrite, controls if it is ok to overwrite an existing item, in which it calls set
+        
+        Returns
+        ---
+        `array` A list of primary keys that were successfully added or overwritten
+        '''
         results = []
         for key, value in entries.items():
             result = self.add_item(key, value, or_overwrite=or_overwrite)
-            results.append(result)
+            if result is not None:
+                results.append(result)
         return results
     
     def remove_item(self, primary_key):
+        '''
+        removes an entry from cache and updates indices. Ignores if entry isn't inside cache
+        
+        Returns
+        ---
+        the item that was removed, or None if it wasn't found'''
         if primary_key not in self.cache:
             return None
-        old_item = self.cache.get(primary_key, None)
 
         if self.is_cache_obj:
-            self.cache.delete_item(primary_key)
+            old_item = self.cache.get_ref(primary_key, None)
+            self.cache.remove_item(primary_key)
         else:
+            old_item = self.cache.get(primary_key, None)
             del self.cache[primary_key]
 
         for index in self.secondary_indices.values():
@@ -404,17 +408,29 @@ class MultiIndexer:
         
         return old_item
 
-    def set_item(self, primary_key, item, all_old_keys = None):
+    def set_item(self, primary_key, item, previous_secondary_keys=None):
         '''
-        if in place edits are done to the object, must get a collection of keys before changes were made (just call `get_item_trackers` with same primary key) and pass that in `all_old_keys`. 
-        No enforcement for it, system will behave in unexpected ways if not done that way'''
+        Sets or adds entry in cache under primary_key to the given item. Then tells indices to clean up keys (remove any old, add new changes). Uses previous_secondary_keys to know what keys were before edits
+        and thus what needs to be removed from indices.
+        Since MultiIndexer may return actual items stored in cache, data could be mistakenly edited in place without calling accessors provided and set can be called after these changes are made.
+        Poses issue as now indices could be out of date of data in object.
+        If working with in place edits outside of accessors, must get secondary keys before changes are made
+        (just call `get_all_secondary_keys` with same primary key before changes) and pass that in `previous_secondary_keys`.
+        No enforcement for it, system will return incorrect stale data if not done that way.
+        The only other option provided is to reindex all indices.
+        
+        Returns
+        ---
+        returns key of item just set or added'''
         if primary_key not in self.cache:
             return self.add_item(primary_key, item)
-        # if in place changes, item and cache.get() will return the same object and data, so rely on old_keys parameter to know old state
-        if all_old_keys is None:
-            # if in place edits done and came here means bad state
-            # if new data then this is what is supposed to happen. if caller passes in keys hope they called right function
-            all_old_keys = self.get_item_trackers(primary_key)
+        # if edits made on separate copy, item passed into set and cache.get() return different data, assume old is still inside cache and previous_secondary_keys is not necessary
+        # if in place changes, item passed into set and cache.get() will return the same object and data, so are relying on privious_secondary_keys parameter to be filled so
+        #       indices can know what keys to delete
+        if previous_secondary_keys is None:
+            # should only be in this if statement when edits made in separate copy (but not always, could still call get_all_secondary_keys and pass in)
+            # if in place edits done and came here means in bad state
+            previous_secondary_keys = self.get_all_secondary_keys(primary_key)
 
         if self.is_cache_obj:
             self.cache.set_item(primary_key, item)
@@ -422,28 +438,43 @@ class MultiIndexer:
             self.cache[primary_key] = item
 
         for index in self.secondary_indices.values():
-            index.set_item_keys(primary_key, all_old_keys[index.name], item)
+            # assumes that if index name is ever missing, then it means no keys
+            index.set_item_keys(primary_key, previous_secondary_keys[index.name] if index.name in previous_secondary_keys else [], item)
         return primary_key
 
-    def get_item_trackers(self, primary_key):
-        '''get all indices' secondary keys for the item stored in cache'''
+    def get_all_secondary_keys(self, primary_key):
+        '''
+        get all indices' secondary keys for the item stored in cache under the given primary key
+        
+        Returns
+        ---
+        None if item isn't found, otherwise dictionary mapping secondary index name to keys that index uses for the item'''
         item = self.cache.get(primary_key, None)
         if item is None:
             return None
         
         secondary_keys = {}
         for index in self.secondary_indices.values():
-            secondary_keys[index.name] = index.get_item_secondary_keys(item)
+            secondary_keys[index.name] = index.get_item_secondary_keys(primary_key, item)
         return secondary_keys
     
-    def reindex(self, index_names:'typing.Optional[list[str]]' = None):
-        '''reload all existing indices to point to items in the new cache'''
+    def reindex(self, index_names:'typing.Optional[list[str]]'=None):
+        '''
+        reload indices to reflect current state of data stored by clearing them then updating with all current items. 
+        Defaults to all indices, otherwise reloads just the list provided (if they are in indexer)
+        
+        Parameters
+        ---
+        * index_names - `Optional[list[str]]`
+            list of index names to try and reindex'''
         if index_names is None or len(index_names) == 0:
+            # default case
             indices = self.secondary_indices.values()
         else:
+            # sort out indices named that are actually in self
             indices = []
             for index_name in index_names:
-                if index_name != "primary":
+                if index_name != "primary" and index_name in self.secondary_indices:
                     indices.append(self.secondary_indices[index_name])
 
         for index in indices:
@@ -452,7 +483,7 @@ class MultiIndexer:
                 index.add_item(key, item)
 
     def clear(self):
-        '''clear out all data in cache and indiex information'''
+        '''clear out all data in cache and index information'''
         self.cache.clear()
         for index in self.secondary_indices.values():
             index.clear()
@@ -465,28 +496,38 @@ class MultiIndexer:
 
 class Cache:
     #note, this is a STUB
+    '''wrapper class and Base class for MultiIndexer's cache. Meant to be storage so just wraps a dictionary, Inherit if there's more behavior primary cache needs compared to a dictionary.
+    For example extra handlers for when items are added, more control over get returning copies or objects, seperate callbacks for adding new vs setting existing.'''
     def __init__(self) -> None:
         self.data = {}
 
     def add_item(self, primary_key, item):
+        '''MultiIndexer uses this as callback to add new item to cache'''
         self.data[primary_key] = item
 
-    def delete_item(self, primary_key):
-        del self.data[primary_key]
+    def remove_item(self, primary_key):
+        '''MultiIndexer uses this as callback to remove item from cache'''
+        if primary_key in self.data:
+            del self.data[primary_key]
 
     def set_item(self, primary_key, item):
+        '''MultiIndexer uses this as callback to set existing item in cache to new data values'''
         self.data[primary_key] = item
 
     def __contains__(self, key):
+        '''MultiIndexer does a lot of 'key in Cache' checks, needed for that behavior'''
         return key in self.data
     
     def get(self, primary_key, default=None):
+        '''must work as a get item stored in Cache, can be overridden to return a copy of item'''
         return self.data.get(primary_key, default)
     
     def get_ref(self, primary_key, default=None):
+        '''expected to work as a get item stored in cache, but always reference to actual object'''
         return self.data.get(primary_key, default)
     
     def clear(self):
+        '''MultiIndexer expects this method to clear all existing data'''
         self.data.clear()
 
     def __iter__(self):
@@ -496,13 +537,18 @@ class Cache:
         return len(self.data) == 0
     
     def __len__(self):
+        '''MultiIndexer has length override that calls this'''
         return len(self.data)
     
     def items(self):
+        '''MultiIndexer uses this for looping'''
         return self.data.items()
     
     def values(self):
+        '''MultiIndexer uses this for looping'''
         return self.data.values()
     
     def keys(self):
+        '''MultiIndexer uses this for looping'''
         return self.data.keys()
+   
