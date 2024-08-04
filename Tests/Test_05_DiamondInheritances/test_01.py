@@ -12,15 +12,15 @@ def test_register_all():
     assert len(type_cache) == 3
 
 def test_parsed_fields():
-    parsed_fields_one = [field["name"] for field in type_cache["ChildOne"].ChildOneGraphNode.PARSED_FIELDS]
+    parsed_fields_one = [field["name"] for field in type_cache["ChildOne"].ChildOneGraphNode.CLASS_FIELDS]
     assert "CN1" in parsed_fields_one
     assert "CN2" not in parsed_fields_one
     assert "GC" not in parsed_fields_one
-    parsed_fields_two = [field["name"] for field in type_cache["ChildTwo"].ChildTwoGraphNode.PARSED_FIELDS]
+    parsed_fields_two = [field["name"] for field in type_cache["ChildTwo"].ChildTwoGraphNode.CLASS_FIELDS]
     assert "CN1" not in parsed_fields_two
     assert "CN2" in parsed_fields_two
     assert "GC" not in parsed_fields_two
-    parsed_fields_three = [field["name"] for field in type_cache["Grandchild"].GrandchildGraphNode.PARSED_FIELDS]
+    parsed_fields_three = [field["name"] for field in type_cache["Grandchild"].GrandchildGraphNode.CLASS_FIELDS]
     assert "CN1" in parsed_fields_three
     assert "CN2" in parsed_fields_three
     assert "GC" in parsed_fields_three

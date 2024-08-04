@@ -2,7 +2,7 @@ import src.DialogNodes.BaseType as BaseType
 
 class ChildTwoGraphNode(BaseType.BaseGraphNode):
     TYPE = "ChildTwo"
-    FIELDS='''
+    ADDED_FIELDS='''
 options:
   - name: CN2
     default: B'''

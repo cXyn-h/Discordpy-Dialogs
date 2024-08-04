@@ -10,22 +10,22 @@ def deprecated_test_load_type():
     type_cache = {}
     # failed re-register shouldn't affect cache
     NodeParser.register_node_type(VT2, "ValidTest", allowed_types=type_cache)
-    assert "PARSED_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
+    assert "CLASS_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
 
     NodeParser.register_node_type(VT2, "ValidTest", re_register=True, allowed_types=type_cache)
     # double checking registering a new node type doesn't immediately load the info
-    assert "PARSED_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
+    assert "CLASS_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     # load should work after registering
     NodeParser.load_type("ValidTest", allowed_types=type_cache)
-    assert "PARSED_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
+    assert "CLASS_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert type_cache["ValidTest"].ValidTestGraphNode.get_node_fields() == [{'name': 'id'}, {'name': 'graph_start', 'default': None}, {'name': 'TTL', 'default': 180}, {'name': 'actions', 'default': []}, {'name': 'events', 'default': {}}, {'default': [], 'name': 'close_actions'}, {'name': 'asdf'}]
 
     NodeParser.register_node_type(VT, "ValidTest", re_register=True, allowed_types=type_cache)
     # re-registering a node that was there should remove from cache
-    assert "PARSED_FIELDS" not in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
+    assert "CLASS_FIELDS" not in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" not in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     # loading should get the new version's info
     NodeParser.load_type("ValidTest")

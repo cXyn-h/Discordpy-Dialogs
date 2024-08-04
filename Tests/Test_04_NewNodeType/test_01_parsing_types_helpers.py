@@ -44,5 +44,5 @@ def test_empty_cache_clears_only_caches():
     '''make sure emptying only clears out caches not allowed types list'''
     NodeParser.empty_cache(NodeParser.ALLOWED_NODE_TYPES)
     assert len(NodeParser.ALLOWED_NODE_TYPES) > 0
-    assert "PARSED_FIELDS" not in vars(BaseType.BaseGraphNode).keys()
+    assert "CLASS_FIELDS" not in vars(BaseType.BaseGraphNode).keys()
     assert "PARSED_SCHEMA" not in vars(BaseType.BaseGraphNode).keys()

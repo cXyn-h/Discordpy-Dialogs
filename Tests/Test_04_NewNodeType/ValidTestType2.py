@@ -8,7 +8,7 @@ from datetime import timedelta
 
 class ValidTestGraphNode(BaseType.BaseGraphNode):
     TYPE = "ValidTest"
-    FIELDS='''
+    ADDED_FIELDS='''
 options:
   - name: testing'''
     SCHEMA = '''

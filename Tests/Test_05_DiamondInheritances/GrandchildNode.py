@@ -3,7 +3,7 @@ import Tests.Test_05_DiamondInheritances.ChildNode2 as CN2
 
 class GrandchildGraphNode(CN1.ChildOneGraphNode, CN2.ChildTwoGraphNode):
     TYPE = "Grandchild"
-    FIELDS='''
+    ADDED_FIELDS='''
 options:
   - name: GC
     default: C'''

@@ -4,7 +4,7 @@ import src.DialogNodes.BaseType as BaseType
 
 TestGraphNode = {
     "TYPE": "Test",
-    "FIELDS":'''
+    "ADDED_FIELDS":'''
 options: []''',
     "SCHEMA": '''
 type: object

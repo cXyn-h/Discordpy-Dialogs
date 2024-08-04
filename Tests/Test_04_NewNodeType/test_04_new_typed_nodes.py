@@ -15,7 +15,7 @@ def test_fields_merged():
     '''make sure node inheritance merges fields'''
     VT2.ValidTestGraphNode.clear_caches()
     VT2.ValidTestGraphNode.get_node_fields()
-    parsed_field_names = [field["name"] for field in VT2.ValidTestGraphNode.PARSED_FIELDS]
+    parsed_field_names = [field["name"] for field in VT2.ValidTestGraphNode.CLASS_FIELDS]
     assert len(parsed_field_names) > 1
     assert "testing" in parsed_field_names
     assert "id" in parsed_field_names
@@ -40,7 +40,7 @@ version: {v}'''.format(v=VT2.ValidTestGraphNode.get_version())
     VT2.ValidTestGraphNode.clear_caches()
     res = NodeParser.register_node_type(VT2, "ValidTest", allowed_types=type_cache)
     assert res == True
-    assert "PARSED_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
+    assert "CLASS_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     
     found_type = NodeParser.validate_yaml_node(yaml.safe_load(simple_input), allowed_types=type_cache)

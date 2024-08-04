@@ -6,7 +6,7 @@ from Extensions.Discord.DiscordUtils import NodetionDCMenuInfo
 
 class DiscordGraphNode(BaseGraphNode):
     VERSION="1.0.0"
-    FIELDS = '''
+    ADDED_FIELDS = '''
 options: []'''
     TYPE="Discord"
     SCHEMA = ''

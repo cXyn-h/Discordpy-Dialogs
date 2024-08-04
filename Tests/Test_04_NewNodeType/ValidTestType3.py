@@ -4,7 +4,7 @@ import src.DialogNodes.BaseType as BaseType
 
 class ValidTestGraphNode(BaseType.BaseGraphNode):
     TYPE = "ValidTest"
-    FIELDS='''
+    ADDED_FIELDS='''
 options:
   - name: asdf
     default: false

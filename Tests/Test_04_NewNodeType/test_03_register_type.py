@@ -22,11 +22,11 @@ def test_register():
     # double checking registering a new node type doesn't immediately load the info
     assert len(type_cache) == 1
     assert "ValidTest" in type_cache
-    assert "PARSED_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
+    assert "CLASS_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
-    assert type_cache["ValidTest"].ValidTestGraphNode.FIELDS == VT.ValidTestGraphNode.FIELDS
+    assert type_cache["ValidTest"].ValidTestGraphNode.ADDED_FIELDS == VT.ValidTestGraphNode.ADDED_FIELDS
     assert BaseType.BaseGraphNode.PARSED_SCHEMA is not VT.ValidTestGraphNode.PARSED_SCHEMA
-    assert BaseType.BaseGraphNode.PARSED_FIELDS is not VT.ValidTestGraphNode.PARSED_FIELDS
+    assert BaseType.BaseGraphNode.CLASS_FIELDS is not VT.ValidTestGraphNode.CLASS_FIELDS
     NodeParser.empty_cache(type_cache)
 
 def test_reregister():
@@ -36,12 +36,12 @@ def test_reregister():
     NodeParser.empty_cache(type_cache)
     assert res == True
     # try registering a type under same name, shouldn't allow overwrites by default
-    assert type_cache["ValidTest"].ValidTestGraphNode.FIELDS == VT.ValidTestGraphNode.FIELDS
+    assert type_cache["ValidTest"].ValidTestGraphNode.ADDED_FIELDS == VT.ValidTestGraphNode.ADDED_FIELDS
     VT2.ValidTestGraphNode.clear_caches()
     res = NodeParser.register_node_type(VT2, "ValidTest", allowed_types=type_cache)
     assert res == False
     assert len(type_cache) == 1
-    assert type_cache["ValidTest"].ValidTestGraphNode.FIELDS == VT.ValidTestGraphNode.FIELDS
+    assert type_cache["ValidTest"].ValidTestGraphNode.ADDED_FIELDS == VT.ValidTestGraphNode.ADDED_FIELDS
     
     # allow overwrites of loaded types, should see a difference in loaded info
     VT2.ValidTestGraphNode.clear_caches()
@@ -49,7 +49,7 @@ def test_reregister():
     assert res == True
     assert len(type_cache) == 1
     assert "ValidTest" in type_cache
-    assert type_cache["ValidTest"].ValidTestGraphNode.FIELDS == VT2.ValidTestGraphNode.FIELDS
+    assert type_cache["ValidTest"].ValidTestGraphNode.ADDED_FIELDS == VT2.ValidTestGraphNode.ADDED_FIELDS
     NodeParser.empty_cache(type_cache)
 
 

@@ -13,8 +13,9 @@ import src.utils.DotNotator as DotNotator
 
 class BaseGraphNode:
     VERSION = "3.8.0"
-    # this specifies what fields will be copied into graph node
-    FIELDS='''
+    # this specifies the class variables that this class will add onto inherited class
+    # variables.
+    ADDED_FIELDS='''
 options:
   - name: id
   - name: graph_start
@@ -31,7 +32,7 @@ options:
     SCHEMA='''
 type: object
 properties:
-    version: 
+    version:
         type: "string"
         pattern: '[0-9]+\.[0-9]+\.[0-9]+'
     id:
@@ -209,7 +210,7 @@ required: ["id"]
             All options defined in the GraphNode class will be added as dot notation referencable fields on each GraphNode object.
             this parameter is a ditionary option name to values for the fields of this object.
             Makes sure all and only all fields listed in Graph node type's class are defined. values that are not primitives should be copied before passing in.
-            On missing values, tries to use defaults from class.FIELDS, otherwise raises an exception. Ignores extras.
+            On missing values, tries to use defaults from class.ADDED_FIELDS, otherwise raises an exception. Ignores extras.
         '''
         # need to get data for all fields that need to exist for node, so get list of all fields and their defaults and go through 
         # passed in list for this instance's values
@@ -348,9 +349,9 @@ required: ["id"]
         Caches result in GraphNode class, and returns a separate copy of result'''
         # note, hasattr uses getattr which default also looks in parent classes, which sensibly also applies to class variables.
         #   don't use it for something that needs to be defined per class independent of parents'
-        if "PARSED_FIELDS" in vars(cls).keys() and cls.PARSED_FIELDS is not None:
+        if "CLASS_FIELDS" in vars(cls).keys() and cls.CLASS_FIELDS is not None:
             # if there's a previous result of parsed definition cached, use that
-            return copy.deepcopy(cls.PARSED_FIELDS)
+            return copy.deepcopy(cls.CLASS_FIELDS)
 
         # nothing cached, need to actually find definitions for this class
         # grab inherited fields first
@@ -367,12 +368,12 @@ required: ["id"]
                     final_definitions[single_field["name"]] = copy.deepcopy(single_field)
 
         # load self definitions on top
-        self_modifications = yaml.safe_load(cls.FIELDS)
+        self_modifications = yaml.safe_load(cls.ADDED_FIELDS)
         if self_modifications is None:
             # this class doesn't have any fields to add, only base type cannot be allowed to do this
             if cls.__name__ == BaseGraphNode.__name__:
                 raise Exception("Base type fields definition is critically malformed. whole system canot be used.")
-            cls.PARSED_FIELDS = list(final_definitions.values())
+            cls.CLASS_FIELDS = list(final_definitions.values())
             return list(final_definitions.values())
         if not isinstance(self_modifications, dict) or "options" not in self_modifications or self_modifications["options"] is None:
             raise Exception(f"node type <{cls.TYPE}> has badly formed fields. Must be either empty or have a list of fields in yaml format")
@@ -385,7 +386,7 @@ required: ["id"]
             else:
                 final_definitions[single_field["name"]] = single_field
 
-        cls.PARSED_FIELDS = list(final_definitions.values())
+        cls.CLASS_FIELDS = list(final_definitions.values())
         return list(final_definitions.values())
     
     @classmethod
@@ -511,8 +512,8 @@ required: ["id"]
     
     @classmethod
     def clear_caches(cls):
-        if "PARSED_FIELDS" in vars(cls).keys():
-            delattr(cls, "PARSED_FIELDS")
+        if "CLASS_FIELDS" in vars(cls).keys():
+            delattr(cls, "CLASS_FIELDS")
         if "PARSED_SCHEMA" in vars(cls).keys():
             delattr(cls, "PARSED_SCHEMA")
 

@@ -4,7 +4,7 @@ import src.DialogNodes.BaseType as BaseType
 
 class TestGraphNode(BaseType.BaseGraphNode):
     TYPE = "Test"
-    FIELDS='''
+    ADDED_FIELDS='''
 key1: sdfsd
 key2: []
 key3:
