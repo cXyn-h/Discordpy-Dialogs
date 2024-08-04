@@ -1,7 +1,7 @@
 import src.DialogHandler as DialogHandler
 import src.DialogNodeParsing as NodeParser
 import src.DialogNodes.BaseType as BaseType
-import src.utils.callbackUtils as cbUtils
+import src.utils.CallbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 import pytest
 import yaml

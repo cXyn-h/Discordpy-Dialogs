@@ -74,8 +74,7 @@ def is_callback_setup(func):
 
 class CallbackDatapack():
     '''class that will hold all data that is being passed to each callback'''
-    def __init__(self, handler, active_node, event, parameter, goal_node_name=None, goal_node=None, **kwargs):
-        self.handler = handler
+    def __init__(self, active_node, event, parameter, goal_node_name=None, goal_node=None, **kwargs):
         self.active_node = active_node
         self.event = event
         self.goal_node_name = goal_node_name

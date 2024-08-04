@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 import Extensions.Discord.DiscordUtils as DiscordUtils
 import Extensions.Discord.DiscordNode as DiscordNodeType
-import src.utils.callbackUtils as cbUtils
+import src.utils.CallbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 
 import logging

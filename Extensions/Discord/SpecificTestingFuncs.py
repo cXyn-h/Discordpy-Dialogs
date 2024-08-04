@@ -2,7 +2,7 @@ import discord
 from discord import ui, InteractionType, Interaction
 import Extensions.Discord.DiscordMessagingFuncs as DiscordFuncs
 import Extensions.Discord.DiscordNode as DiscordNodeType
-import src.utils.callbackUtils as cbUtils
+import src.utils.CallbackUtils as cbUtils
 import Extensions.Discord.DiscordUtils as DiscordUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 

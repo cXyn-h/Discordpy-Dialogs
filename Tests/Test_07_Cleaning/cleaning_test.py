@@ -1,6 +1,6 @@
 import src.DialogHandler as DialogHandler
 import src.DialogNodeParsing as DialogParser
-import src.utils.callbackUtils as cbUtils
+import src.utils.CallbackUtils as cbUtils
 from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE, ITEM_STATUS
 from datetime import datetime, timedelta
 import yaml

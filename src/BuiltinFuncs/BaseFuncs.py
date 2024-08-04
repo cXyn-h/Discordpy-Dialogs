@@ -1,4 +1,4 @@
-import src.utils.callbackUtils as cbUtils
+import src.utils.CallbackUtils as cbUtils
 import src.DialogNodes.BaseType as BaseType
 import random
 from datetime import datetime, timedelta

@@ -15,7 +15,7 @@ import copy
 
 import src.DialogNodeParsing as nodeParser
 
-import src.utils.callbackUtils as CbUtils
+import src.utils.CallbackUtils as CbUtils
 import src.BuiltinFuncs.BaseFuncs as BaseFuncs
 # annotating function purposes
 from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE, ITEM_STATUS, TASK_STATE
@@ -230,7 +230,7 @@ class DialogHandler():
         ---
         * func - `callable`
             function that you want handler to be able to call. Must have fields attached that hold configuration settings for how 
-            function works in handler. see callbackUtils for settings
+            function works in handler. see CallbackUtils for settings
         * override_settings -  `dict[str, Any]`
             dict holding setting name to settings this handler should override function's default ones with. currently only looks for
             'allowed_sections' and 'cb_key'
@@ -536,7 +536,7 @@ class DialogHandler():
                     transition_close_flag = [transition_close_flag]
 
             if "transition_counters" in transition:
-                count_results = self._counter_runner(copy.deepcopy(transition_node_counts), active_node,event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
+                count_results = self._counter_runner(copy.deepcopy(transition_node_counts), active_node, event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
             else:
                 count_results = transition_node_counts
             dialog_logger.debug(f"counters finished executing for transition <{transition_ind}>, counts are {count_results}, to loop through <{count_results.keys()}>")
@@ -888,7 +888,7 @@ class DialogHandler():
                 return None
         dialog_logger.debug(f"Dialog handler id'd <{id(self)}> starting running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>")
         func_ref = self.functions_cache.get(func_name)[0]["ref"]
-        parameters = CbUtils.CallbackDatapack(handler=self,
+        parameters = CbUtils.CallbackDatapack(
                                               active_node=active_node,
                                               event=event,
                                               parameter=copy.deepcopy(values) if values is not None else None,
