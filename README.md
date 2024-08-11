@@ -1,7 +1,6 @@
 # Nodetion
 Currently on version Alpha 3.8.0.  
 YAML format is functionally complete for alpha plans and mostly stable, but in alpha testing to discover use cases. !!!THIS IS YOUR WARNING THINGS ARE STILL A BIT ROUGH!!! Started and created as a system to manage interactive dialogs for a Discord bot, but further designed to extend to situations where the system waits for a variety of events with possibly multiple entities traversing the same graph layout.  
-There are remnants of version 2.0, It is deprecated.  
 Designed in collaboration with @e-a-h
 
 ## What is this project?
