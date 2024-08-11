@@ -77,8 +77,7 @@ class DialogHandler():
         self.graph_node_indexer = Cache.MultiIndexer(
                 cache=graph_nodes,
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: x.TYPE),
-                    Cache.FieldValueIndex("next_nodes", keys_value_finder=lambda x: x.indexer(["next_nodes"])[1])
+                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: x.TYPE)
                 ]
         )
         '''maps the string node id from yaml to graph node object.'''
@@ -326,14 +325,14 @@ class DialogHandler():
             execution_reporting.warn(f"cannot start at <{node_id}>, not valid node")
             return None
         graph_node:BaseType.BaseGraphNode = self.graph_node_indexer.get_ref(node_id)
-        if not graph_node.can_start(event_key):
+        if not graph_node.is_graph_start(event_key):
             execution_reporting.warn(f"cannot start at <{node_id}>, settings do not allow either starting at node or starting with event type <{event_key}>")
             return None
         
         # process session before node since the activation process binds session and currently don't have a neat written out process to bind new session
         session:typing.Union[SessionData.SessionData, None] = None
-        if graph_node.starts_with_session(event_key):
-            default_session_duration = graph_node.get_start_session_TTL(event_key)
+        if graph_node.graph_starts_with_session(event_key):
+            default_session_duration = graph_node.get_graph_start_session_TTL(event_key)
             if default_session_duration is not None:
                 execution_reporting.info(f"dialog handler id'd <{id(self)}> start at node <{node_id}> with event <{event_key}> found yaml defines session TTL")
                 session = SessionData.SessionData(timeout_duration=timedelta(seconds=default_session_duration))
@@ -441,8 +440,8 @@ class DialogHandler():
         dialog_logger.debug(f"handler id'd <{id(self)}> running event filters. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, type of event <{type(event)}> filters: <{active_node.graph_node.get_event_filters(event_key)}>")
         
         if version == "start":
-            dialog_logger.debug(f"running start version of filters on node {active_node}, start filters are {active_node.graph_node.get_start_filters(event_key)}")
-            node_filters = active_node.graph_node.get_start_filters(event_key)
+            dialog_logger.debug(f"running start version of filters on node {active_node}, start filters are {active_node.graph_node.get_graph_start_filters(event_key)}")
+            node_filters = active_node.graph_node.get_graph_start_filters(event_key)
         else:
             node_filters = active_node.graph_node.get_event_filters(event_key)
             #custom event types designed to have extra addon filters, still being fleshed out as of 3.6.0
@@ -477,13 +476,13 @@ class DialogHandler():
         Returns callbacks' modifications to flags for whether or not should close node and/or session. Format is `{"close_node": bool, "close_session": bool}`. System
         combines these 'should close' flags by OR'ing them together. Only the regular event callbacks (ie when version = None) acutally use the return values'''
         if version == "start":
-            callbacks = active_node.graph_node.get_start_callbacks(event_key)
+            callbacks = active_node.graph_node.get_graph_start_setup(event_key)
             execution_reporting.debug(f"running start callbacks. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, callbacks: <{callbacks}>")
         elif version == "close":
-            callbacks = active_node.graph_node.get_close_callbacks()
+            callbacks = active_node.graph_node.get_node_close_actions()
             execution_reporting.debug(f"running closing callbacks. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, callbacks: <{callbacks}>")
         else:
-            callbacks = active_node.graph_node.get_event_callbacks(event_key)
+            callbacks = active_node.graph_node.get_event_actions(event_key)
             execution_reporting.debug(f"running event callback. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, callbacks: <{callbacks}>")
         
         old_node_timeout = copy.deepcopy(active_node.timeout) if active_node.timeout is not None else None
@@ -683,7 +682,7 @@ class DialogHandler():
         if active_node.session is not None:
             active_node.session.activate()
 
-        await self._action_list_runner(active_node, event, active_node.graph_node.get_callbacks(), POSSIBLE_PURPOSES.ACTION)
+        await self._action_list_runner(active_node, event, active_node.graph_node.get_node_actions(), POSSIBLE_PURPOSES.ACTION)
         
         self.create_timeout_tracker(active_node)
         if active_node.session is not None:

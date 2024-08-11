@@ -12,14 +12,14 @@ def test_validate_mirrors_changes():
     assert "CLASS_FIELDS" in vars(VT2.ValidTestGraphNode).keys()
     assert VT2.ValidTestGraphNode.CLASS_FIELDS is not None
     VT2.ValidTestGraphNode.ADDED_FIELDS = ITT6.TestGraphNode.ADDED_FIELDS
-    assert old_parsed_fields == VT2.ValidTestGraphNode.CLASS_FIELDS
+    assert old_parsed_fields == VT2.ValidTestGraphNode.CLASS_FIELDS[1]
     with pytest.raises(Exception):
         NodeParser.validate_type(VT2, "ValidTest")
     
     VT2.ValidTestGraphNode.ADDED_FIELDS = old_fields
     assert not "CLASS_FIELDS" in vars(VT2.ValidTestGraphNode).keys()
     NodeParser.validate_type(VT2, "ValidTest")
-    assert old_parsed_fields == VT2.ValidTestGraphNode.CLASS_FIELDS
+    assert old_parsed_fields == VT2.ValidTestGraphNode.CLASS_FIELDS[1]
 
 def test_new_type_schemas():
     '''make sure schemas are merged as expected for new types'''

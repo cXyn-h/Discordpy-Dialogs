@@ -4,14 +4,14 @@ def test_parsed_fields_copy():
     if "CLASS_FIELDS" in vars(BaseType.BaseGraphNode).keys():
         BaseType.BaseGraphNode.clear_caches()
     fields = BaseType.BaseGraphNode.get_node_fields()
-    assert fields is not BaseType.BaseGraphNode.CLASS_FIELDS
+    assert fields is not BaseType.BaseGraphNode.CLASS_FIELDS[1]
     fields2 = BaseType.BaseGraphNode.get_node_fields()
-    assert fields2 is not BaseType.BaseGraphNode.CLASS_FIELDS
+    assert fields2 is not BaseType.BaseGraphNode.CLASS_FIELDS[1]
 
 def test_parsed_schema_copy():
     if "PARSED_SCHEMA" in vars(BaseType.BaseGraphNode).keys():
         BaseType.BaseGraphNode.clear_caches()
     schema = BaseType.BaseGraphNode.get_node_schema()
-    assert schema is not BaseType.BaseGraphNode.PARSED_SCHEMA
+    assert schema is not BaseType.BaseGraphNode.PARSED_SCHEMA[1]
     schema2 = BaseType.BaseGraphNode.get_node_schema()
-    assert schema2 is not BaseType.BaseGraphNode.PARSED_SCHEMA
+    assert schema2 is not BaseType.BaseGraphNode.PARSED_SCHEMA[1]

@@ -25,8 +25,8 @@ def test_register():
     assert "CLASS_FIELDS" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert "PARSED_SCHEMA" in vars(type_cache["ValidTest"].ValidTestGraphNode).keys()
     assert type_cache["ValidTest"].ValidTestGraphNode.ADDED_FIELDS == VT.ValidTestGraphNode.ADDED_FIELDS
-    assert BaseType.BaseGraphNode.PARSED_SCHEMA is not VT.ValidTestGraphNode.PARSED_SCHEMA
-    assert BaseType.BaseGraphNode.CLASS_FIELDS is not VT.ValidTestGraphNode.CLASS_FIELDS
+    assert BaseType.BaseGraphNode.PARSED_SCHEMA[1] is not VT.ValidTestGraphNode.PARSED_SCHEMA[1]
+    assert BaseType.BaseGraphNode.CLASS_FIELDS[1] is not VT.ValidTestGraphNode.CLASS_FIELDS[1]
     NodeParser.empty_cache(type_cache)
 
 def test_reregister():

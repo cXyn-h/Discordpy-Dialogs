@@ -6,7 +6,11 @@ class ChildTwoGraphNode(BaseType.BaseGraphNode):
 options:
   - name: CN2
     default: B'''
-    SCHEMA = ''''''
+    SCHEMA = '''
+type: object
+properties:
+    c:
+        type: string'''
     VERSION="1.0.0"
 
 class ChildTwoNode(BaseType.BaseNode):

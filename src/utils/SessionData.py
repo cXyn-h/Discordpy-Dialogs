@@ -4,7 +4,7 @@ import src.DialogNodes.BaseType as BaseType
 from src.utils.Enums import ITEM_STATUS
 
 class SessionData:
-    
+    DEFAULT_TTL = 600
     def __init__(self, timeout_duration=timedelta(minutes=10)) -> None:
         self.linked_nodes:list[BaseType.BaseNode] = []
         self.set_TTL(timeout_duration)

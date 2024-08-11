@@ -6,7 +6,11 @@ class ChildOneGraphNode(BaseType.BaseGraphNode):
 options:
   - name: CN1
     default: A'''
-    SCHEMA = ''''''
+    SCHEMA = '''
+type: object
+properties:
+    d:
+        type: string'''
     VERSION="1.0.0"
 
 class ChildOneNode(BaseType.BaseNode):

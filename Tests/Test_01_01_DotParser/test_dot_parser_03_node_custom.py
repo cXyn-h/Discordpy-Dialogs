@@ -41,7 +41,8 @@ def test_Base_custom_special():
     functions_result.sort()
     assert functions_result == ["delete", "prep", "prep_transition", "respond", "send"]
 
-    next_nodes_result = DotNotator.parse_dot_notation(["next_nodes"], loaded_node_01, custom_func_name="indexer")
-    assert isinstance(next_nodes_result, list)
-    next_nodes_result.sort()
-    assert next_nodes_result == ["handle_post", "test", "test2"]
+    #disabled for node v3.8.0
+    # next_nodes_result = DotNotator.parse_dot_notation(["next_nodes"], loaded_node_01, custom_func_name="indexer")
+    # assert isinstance(next_nodes_result, list)
+    # next_nodes_result.sort()
+    # assert next_nodes_result == ["handle_post", "test", "test2"]

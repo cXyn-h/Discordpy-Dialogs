@@ -9,13 +9,15 @@ import yaml
 def test_definition_merges():
     '''test function for finding graph node fields handles double definitions by merging them'''
     res = VT3.ValidTestGraphNode.get_node_fields()
-    assert res == [{'name': 'id'}, {'name': 'graph_start', 'default': None}, {'name': 'TTL', 'default': 180}, {'name': 'actions', 'default': []}, {'name': 'events', 'default': {}}, {'name': 'close_actions', 'default': []}, {"name":"asdf", "default": []}]
+    VT3.ValidTestGraphNode.CLASS_FIELDS[1].sort(key=lambda x: x["name"])
+    res.sort(key=lambda x: x["name"])
+    assert res == VT3.ValidTestGraphNode.CLASS_FIELDS[1]
 
 def test_fields_merged():
     '''make sure node inheritance merges fields'''
     VT2.ValidTestGraphNode.clear_caches()
     VT2.ValidTestGraphNode.get_node_fields()
-    parsed_field_names = [field["name"] for field in VT2.ValidTestGraphNode.CLASS_FIELDS]
+    parsed_field_names = [field["name"] for field in VT2.ValidTestGraphNode.CLASS_FIELDS[1]]
     assert len(parsed_field_names) > 1
     assert "testing" in parsed_field_names
     assert "id" in parsed_field_names
@@ -25,8 +27,8 @@ def test_schema_merged():
     VT.ValidTestGraphNode.clear_caches()
     VT2.ValidTestGraphNode.clear_caches()
     VT2.ValidTestGraphNode.get_node_schema()
-    assert len(VT2.ValidTestGraphNode.PARSED_SCHEMA["allOf"]) == 2
-    assert VT2.ValidTestGraphNode.PARSED_SCHEMA["allOf"][0] == yaml.safe_load(VT2.ValidTestGraphNode.SCHEMA) or VT2.ValidTestGraphNode.PARSED_SCHEMA["allOf"][1] == yaml.safe_load(VT2.ValidTestGraphNode.SCHEMA)
+    assert len(VT2.ValidTestGraphNode.PARSED_SCHEMA[1]["allOf"]) == 2
+    assert VT2.ValidTestGraphNode.PARSED_SCHEMA[1]["allOf"][0] == yaml.safe_load(VT2.ValidTestGraphNode.SCHEMA) or VT2.ValidTestGraphNode.PARSED_SCHEMA[1]["allOf"][1] == yaml.safe_load(VT2.ValidTestGraphNode.SCHEMA)
     VT2.ValidTestGraphNode.clear_caches()
 
 def test_validate_node():

@@ -65,7 +65,11 @@ def register_node_type(type_module, type_name:str, re_register=False, allowed_ty
         boolean for whether or not it's ok to override if already registered. prints out warning if trying to re-register and this is false
     allowed_types - `dict[str, module]`
         dictonary of types that are already registered and allowed to use for parsing. uses global storage dictionary as default, otherwise can override
-        with local registries'''
+        with local registries
+        
+    Returns
+    ---
+    `bool` - wether or not type was registered or re-registered'''
     parsing_logger.debug(f"trying to register a node under <{type_name}>")
     graph_node_ref:BaseType.BaseGraphNode = getattr(type_module, type_name+"GraphNode")
     # if not valid, it will error out and won't finish registering
@@ -223,7 +227,8 @@ def parse_node(yaml_node, file_location="", allowed_types:"dict[str,BaseType.Bas
     node_type = validate_yaml_node(yaml_node, file_location, allowed_types=allowed_types)
 
     try:
-        graph_node:BaseType.BaseGraphNode = getattr(allowed_types[node_type], node_type+"GraphNode")(yaml_node)
+        node_class = getattr(allowed_types[node_type], node_type+"GraphNode")
+        graph_node:BaseType.BaseGraphNode = node_class(yaml_node)
     except Exception as e:
         raise Exception(f"node {'located in '+file_location+' ' if len(file_location) > 0 else ''} errored: {e}")
     parsing_logger.debug(f"parsed node is <{graph_node.id}>")
@@ -243,7 +248,7 @@ def validate_yaml_node(yaml_node, file_location="", allowed_types:"dict[str,Base
     Return
     ---
     string
-        node type pf just validated node'''
+        node type of just validated node'''
 
     node_type = "Base" # default assumed type, the most basic node
     if "Base" not in allowed_types:
@@ -258,7 +263,7 @@ def validate_yaml_node(yaml_node, file_location="", allowed_types:"dict[str,Base
     graph_node:BaseType.BaseGraphNode = getattr(allowed_types[node_type], node_type+"GraphNode")
 
     # version label is grabbed and checked. each node type handles versions separately
-    # yaml can use one of two different keys
+    # as of node v3.8.0 "v" shorthand not supported anymore
     node_version = None
     if "version" in yaml_node and "v" in yaml_node:
         raise Exception(f"yaml node {'located in '+file_location+' ' if len(file_location) > 0 else ''}has two keys specifying version, use only one")
@@ -270,6 +275,7 @@ def validate_yaml_node(yaml_node, file_location="", allowed_types:"dict[str,Base
 
     if not node_version:
         parsing_logger.debug(f"yaml node {'located in '+file_location+' ' if len(file_location) > 0 else ''}found without version")
+        node_version = graph_node.VERSION
 
     is_compatible, warnings = graph_node.check_version_compatibility(node_version)
 

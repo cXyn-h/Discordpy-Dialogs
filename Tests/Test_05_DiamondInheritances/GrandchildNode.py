@@ -1,7 +1,7 @@
-import Tests.Test_05_DiamondInheritances.ChildNode1 as CN1
-import Tests.Test_05_DiamondInheritances.ChildNode2 as CN2
+import Tests.Test_05_DiamondInheritances.ChildNode3 as CN3
+import Tests.Test_05_DiamondInheritances.ChildNode4 as CN4
 
-class GrandchildGraphNode(CN1.ChildOneGraphNode, CN2.ChildTwoGraphNode):
+class GrandchildGraphNode(CN3.ChildThreeGraphNode, CN4.ChildFourGraphNode):
     TYPE = "Grandchild"
     ADDED_FIELDS='''
 options:
@@ -10,5 +10,5 @@ options:
     SCHEMA = ''''''
     VERSION="1.0.0"
 
-class GrandchildNode(CN1.ChildOneGraphNode, CN2.ChildTwoGraphNode):
+class GrandchildNode(CN3.ChildThreeNode, CN4.ChildFourNode):
     pass
