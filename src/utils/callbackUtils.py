@@ -74,12 +74,16 @@ def is_callback_setup(func):
 
 class CallbackDatapack():
     '''class that will hold all data that is being passed to each callback'''
-    def __init__(self, active_node, event, parameter, goal_node_name=None, goal_node=None, **kwargs):
+    def __init__(self, active_node, event, base_parameter, goal_node_name=None, goal_node=None, section_data=None, section_name="", control_data=None, section_progress=None, **kwargs):
         self.active_node = active_node
         self.event = event
         self.goal_node_name = goal_node_name
         self.goal_node = goal_node
-        self.parameter = parameter
+        self.base_parameter = base_parameter
+        self.section_name = section_name
+        self.section_data = section_data if section_data else {}
+        self.control_data = control_data if control_data else {}
+        self.section_progress = section_progress if section_progress else {}
 
         for option, data in kwargs.items():
             setattr(self, option, data)

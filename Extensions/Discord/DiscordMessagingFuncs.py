@@ -48,10 +48,10 @@ async def send_message(data:cbUtils.CallbackDatapack):
     bot = data.bot
 
     # override yaml with anything that is generated in function_data
-    yaml_settings = data.parameter
-    if "next_message_settings" in data.function_data:
-        settings = merge_message_settings(yaml_settings, data.function_data["next_message_settings"])
-        del data.function_data["next_message_settings"]
+    yaml_settings = data.base_parameter
+    if "next_message_settings" in data.section_data:
+        settings = merge_message_settings(yaml_settings, data.section_data["next_message_settings"])
+        del data.section_data["next_message_settings"]
     else:
         settings = yaml_settings
     
@@ -139,7 +139,7 @@ async def send_message(data:cbUtils.CallbackDatapack):
             discord_logger.debug(f"interaction sent response is <{sent_message.id}>, {sent_message}")
             sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
             active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            data.function_data["previous_message"] = sent_message_info
+            data.section_data["previous_message"] = sent_message_info
         else:
             discord_logger.debug(f"send message interaction didn't happen in destination channel")
             # event channel is different from intended destination
@@ -158,7 +158,7 @@ async def send_message(data:cbUtils.CallbackDatapack):
             discord_logger.debug(f"sent actual message to correct destination channel, the message is <{sent_message.id}>, <{sent_message}>")
             sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
             active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            data.function_data["previous_message"] = sent_message_info
+            data.section_data["previous_message"] = sent_message_info
     else:
         discord_logger.debug(f"send message either interaction already responded or non-interaction response")
         # either non-interaction event or interaction already handled
@@ -182,7 +182,7 @@ async def send_message(data:cbUtils.CallbackDatapack):
             discord_logger.debug(f"sent message is <{sent_message.id}>, <{sent_message}>")
             sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
             active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            data.function_data["previous_message"] = sent_message_info
+            data.section_data["previous_message"] = sent_message_info
         else:
             discord_logger.debug(f"send message non-interaction response is not in destination channel")
             # event channel is different from intended destination
@@ -203,7 +203,7 @@ async def send_message(data:cbUtils.CallbackDatapack):
             sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
             active_node.record_menu_message(settings["menu_name"], sent_message_info)
             #TODO: TEST out this with timeout event now being able to grab and save data
-            data.function_data["previous_message"] = sent_message_info
+            data.section_data["previous_message"] = sent_message_info
 
             
 cbUtils.set_callback_settings(send_message, schema="FuncSchemas/sendMessageSchema.yml", has_parameter="always", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
@@ -214,10 +214,10 @@ async def edit_message(data:cbUtils.CallbackDatapack):
     event = data.event
     bot = data.bot
 
-    yaml_settings = data.parameter
-    if "next_message_settings" in data.function_data:
-        settings = merge_message_settings(yaml_settings, data.function_data["next_message_settings"])
-        del data.function_data["next_message_settings"]
+    yaml_settings = data.base_parameter
+    if "next_message_settings" in data.section_data:
+        settings = merge_message_settings(yaml_settings, data.section_data["next_message_settings"])
+        del data.section_data["next_message_settings"]
     else:
         settings = yaml_settings
 
@@ -260,7 +260,7 @@ async def edit_message(data:cbUtils.CallbackDatapack):
                 discord_logger.debug(f"stopping old view")
                 message_info.view.stop()
             message_info.view = message_components["view"]
-        data.function_data["previous_message"] = message_info
+        data.section_data["previous_message"] = message_info
     else:
         discord_logger.debug(f"menu name not specified, so using origin message")
         # menu name not specified, defaults to what caused the event
@@ -291,7 +291,7 @@ async def edit_message(data:cbUtils.CallbackDatapack):
                             if message_info.view is not None:
                                 message_info.view.stop()
                             message_info.view = message_components["view"]
-                        data.function_data["previous_message"] = message_info
+                        data.section_data["previous_message"] = message_info
                         break
         # no else, usually this would be message or slash command events and there'd be nothing to edit
     discord_logger.debug(f"got to redirect handling, was a message edited? <{made_edits}>")
@@ -328,13 +328,13 @@ async def edit_message(data:cbUtils.CallbackDatapack):
 cbUtils.set_callback_settings(edit_message, schema="FuncSchemas/editMessageSchema.yml", has_parameter="always", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
 
 def setup_next_message(data:cbUtils.CallbackDatapack):
-    settings = data.parameter
-    if "next_message_settings" in data.function_data:
-        next_message_settings = data.function_data["next_message_settings"]
+    settings = data.base_parameter
+    if "next_message_settings" in data.section_data:
+        next_message_settings = data.section_data["next_message_settings"]
     else:
         next_message_settings = {}
     merge_message_settings(next_message_settings, settings)
-    data.function_data["next_message_settings"] = next_message_settings
+    data.section_data["next_message_settings"] = next_message_settings
 cbUtils.set_callback_settings(setup_next_message, schema="FuncSchemas/sendMessageSchema.yml", has_parameter="always", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
 
 @cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter='optional', schema={"type":"object", "properties":{
@@ -349,8 +349,8 @@ def mark_default_channel(data:cbUtils.CallbackDatapack):
     or from the last message sent in the action section this is used in'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    func_data = data.function_data
-    settings = data.parameter
+    func_data = data.section_data
+    settings = data.base_parameter
 
     discord_logger.debug(f"default channel starting")
 
@@ -363,8 +363,8 @@ def mark_default_channel(data:cbUtils.CallbackDatapack):
     
     if settings is not None and "channel_id" in settings:
         channel_id = settings["channel_id"]
-    elif "previous_message" in data.function_data:
-        channel_id = data.function_data["previous_message"].message.channel.id
+    elif "previous_message" in data.section_data:
+        channel_id = data.section_data["previous_message"].message.channel.id
     else:
         return None
 
@@ -379,7 +379,7 @@ async def clear_buttons(data:cbUtils.CallbackDatapack):
     to the provided messages (to help show oh no we're closed now)'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    settings = data.parameter
+    settings = data.base_parameter
     to_close_menus = settings["close_menus"] if "close_menus" in settings else list(active_node.menu_messages_info.keys())
     timed_out_message = settings["timeout"] if settings is not None and "timeout" in settings else None
     closed_message = settings["closed"] if settings is not None and "closed" in settings else None
@@ -409,7 +409,7 @@ def clicked_this_menu(data:cbUtils.CallbackDatapack):
     '''filter function that checks if event (should be an interaction) interacted on one of this node's menus'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    filter_menus = data.parameter if data.parameter is not None else list(active_node.menu_messages_info.keys())
+    filter_menus = data.base_parameter if data.base_parameter is not None else list(active_node.menu_messages_info.keys())
 
     if len(active_node.menu_messages_info) == 0:
         return False
@@ -428,7 +428,7 @@ async def remove_message(data:cbUtils.CallbackDatapack):
     '''callback function that deletes all discord messages recorded as menu or secondary in node. secondary should be supplementary messages sent by bot'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    settings = data.parameter
+    settings = data.base_parameter
     if settings is None:
         settings = ["*menus", "*replies"]
     elif isinstance(settings, str):
@@ -451,7 +451,7 @@ cbUtils.set_callback_settings(remove_message, allowed_sections=[POSSIBLE_PURPOSE
 def button_is(data:cbUtils.CallbackDatapack):
     '''filter or transition function checks if button event is one of allowed ones passed in custom_ids'''
     event = data.event
-    custom_ids = data.parameter
+    custom_ids = data.base_parameter
     if isinstance(custom_ids, str):
         return event.data["custom_id"] == custom_ids
     else:
@@ -468,7 +468,7 @@ def is_session_user(data:cbUtils.CallbackDatapack):
     active_node = data.active_node
     event = data.event
     if active_node.session is None or "user" not in active_node.session.data:
-        discord_logger.debug(f"active node is none or user not recorded {active_node.session is None} or {'user' not in active_node.session.data}")
+        discord_logger.debug(f"active node is none or user not recorded {active_node.session is None}")
         return False
     if isinstance(event, Interaction):
         discord_logger.debug(f"recording user from interaction {event.user.id}")
@@ -488,7 +488,7 @@ def session_link_user(data:cbUtils.CallbackDatapack):
     active_node = data.active_node
     event = data.event
     goal_node = data.goal_node
-    targets = data.parameter
+    targets = data.base_parameter
 
     if targets is None:
         targets = ["current_session"]
@@ -512,7 +512,7 @@ def is_reply(data:cbUtils.CallbackDatapack):
     '''filter function that checks if message event is replying to menu message, with settings to check if it is a reply to secondary or reply messages'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    settings = data.parameter
+    settings = data.base_parameter
 
     #TODO: combine yaml parameters with function data
 
@@ -555,7 +555,7 @@ def transfer_menus(data:cbUtils.CallbackDatapack):
     sending a new one'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     goal_node:DiscordNodeType.DiscordNode = data.goal_node
-    settings = data.parameter
+    settings = data.base_parameter
     
     if isinstance(settings , str):
         settings = [settings]
@@ -579,7 +579,7 @@ def rename_menu(data:cbUtils.CallbackDatapack):
     sending a new one'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     goal_node:DiscordNodeType.DiscordNode = data.goal_node
-    settings = data.parameter
+    settings = data.base_parameter
     
     if settings["target"] == "current_node":
         node = active_node
@@ -606,7 +606,7 @@ def selection_is(data:cbUtils.CallbackDatapack):
     active_node = data.active_node
     event = data.event
     goal_node = data.goal_node
-    settings = data.parameter
+    settings = data.base_parameter
 
     if not isinstance(event, Interaction) or \
             not event.type == InteractionType.component or \
@@ -628,7 +628,7 @@ def is_server_member(data:cbUtils.CallbackDatapack):
     active_node = data.active_node
     event = data.event
     goal_node = data.goal_node
-    server_id = data.parameter
+    server_id = data.base_parameter
 
     if (active_node.session is None or "server_id" not in active_node.session.data or active_node.session.data["server_id"] is None) and server_id is None:
         return False
@@ -652,7 +652,7 @@ def is_server_member(data:cbUtils.CallbackDatapack):
 async def send_DM(data:cbUtils.CallbackDatapack):
     active_node = data.active_node
     event = data.event
-    settings = data.parameter
+    settings = data.base_parameter
     if isinstance(event, Interaction):
         user = event.user
     else:

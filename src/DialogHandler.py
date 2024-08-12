@@ -52,13 +52,11 @@ execution_reporting.setLevel(logging.DEBUG)
 #TODO: create modal support
 #TODO: saving and loading active nodes
 #TODO: maybe transition callback functions have a transition info paramter?
-#TODO: should runtime be able to affect the node settings like next node to go to, callback list etc
 #TODO: Templating yaml?
 #TODO: go through code fine sweep for anything that could be changing data meant to be read
 #TODO: during transition order is to section session which closes node which has only one set way to close every time then does transition callbacks.
 #       This causes a flickering of buttons on discord menu message. Can I get that to not happen somehow? Can i get more info to close node so it can pass it to callbacks about why it's called?
 #       tho at least close_node knowing why it was calle would be good for debugging
-#TODO: might need add to async handle events later thing instead of awaitng notify
 #TODO: make callback permitted purposes more precise
 #TODO: bug timeout as event, if you specify should close in handling it doesn't recognize timeout when closing node anymore
 
@@ -77,7 +75,8 @@ class DialogHandler():
         self.graph_node_indexer = Cache.MultiIndexer(
                 cache=graph_nodes,
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: x.TYPE)
+                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: x.TYPE),
+                    Cache.FieldValueIndex("functions", keys_value_finder=lambda x: x.TYPE)
                 ]
         )
         '''maps the string node id from yaml to graph node object.'''
@@ -284,26 +283,28 @@ class DialogHandler():
         return functions_registered
 
     def register_module(self, module):
-        '''registers function from module. module must have a variable called "dialog_func_info" that holds mapping of functions 
+        '''registers functions from module. module must have a variable called "dialog_func_info" that holds mapping of functions 
         to overrides, and only those funcitons from module are registered'''
         return self.register_functions(module.dialog_func_info)
 
-    def function_is_permitted(self, func_key:str, section:POSSIBLE_PURPOSES, escalate_errors=False):
-        '''if function is registered in handler and is permitted to run in the given section of handling and transitioning
+    def function_is_permitted(self, func_key:str, purpose:POSSIBLE_PURPOSES, escalate_errors=False):
+        '''
+        Checks if function is allowed to run for the given section.
 
         Return
         ---
+        `bool` - if function is registered in handler and is permitted to run in the given section of handling. 
         False if function is not registered, false if registered and not permitted'''
         if func_key not in self.functions_cache:
-            execution_reporting.error(f"checking if <{func_key}> can run during phase <{section}> but it is not registered")
+            execution_reporting.error(f"checking if <{func_key}> can run during phase <{purpose}> but it is not registered")
             if escalate_errors:
-                raise Exception(f"checking if <{func_key}> can run during phase {section} but it is not registered")
+                raise Exception(f"checking if <{func_key}> can run during phase {purpose} but it is not registered")
             return False
-        if section not in self.functions_cache.get_ref(func_key)["permitted_purposes"]:
+        if purpose not in self.functions_cache.get_ref(func_key)["permitted_purposes"]:
             # note, not accessing function.allowed_sections because this field contains overridden values from registering
-            execution_reporting.warn(f"checking if <{func_key}> can run during phase <{section}> but it is not allowed")
+            execution_reporting.warn(f"checking if <{func_key}> can run during phase <{purpose}> but it is not allowed")
             if escalate_errors:
-                raise Exception(f"checking if <{func_key}> can run during phase {section} but it is not allowed")
+                raise Exception(f"checking if <{func_key}> can run during phase {purpose} but it is not allowed")
             return False
         return True
 
@@ -374,11 +375,11 @@ class DialogHandler():
             specified via yaml can handle that type of event'''
         dialog_logger.info(f"handler id'd <{id(self)}> has been notified of event happening. event key <{event_key}> id'd <{id(event)}> oject type <{type(event)}>")
         waiting_node_keys = self.active_node_cache.get_keys(event_key, index_name="event_forwarding", default=[])
-        dialog_logger.debug(f"nodes waiting for event <{event_key}> are <{[f'<{str(id(self.active_node_cache.get_ref(x)))}><{self.active_node_cache.get_ref(x).graph_node.id}>' for x in waiting_node_keys]}>")
+        dialog_logger.debug(f"handler id'd <{id(self)}>, event id'd <{id(event)}> nodes waiting for event <{event_key}> are <{[f'<{str(id(self.active_node_cache.get_ref(x)))}><{self.active_node_cache.get_ref(x).graph_node.id}>' for x in waiting_node_keys]}>")
         # don't use gather here, think it batches it so all nodes responding to event have to pass callbacks before any one of them go on to transitions
         # each node is mostly independent of others for each event and don't want them to wait for another node to finish
         notify_results = await asyncio.gather(*[self._run_event_on_node(self.active_node_cache.get_ref(a_n_key), event_key, event) for a_n_key in waiting_node_keys])
-        dialog_logger.debug(f"handler id'd <{id(self)}> results returned to notify method are <{notify_results}>")
+        dialog_logger.debug(f"handler id'd <{id(self)}>, event id'd <{id(event)}> end of handle_event results are <{notify_results}>")
 
     def notify_event(self, event_key, event):
         event_loop = asyncio.get_event_loop()
@@ -440,7 +441,7 @@ class DialogHandler():
         dialog_logger.debug(f"handler id'd <{id(self)}> running event filters. node <{id(active_node)}><{active_node.graph_node.id}>, event key <{event_key}>, type of event <{type(event)}> filters: <{active_node.graph_node.get_event_filters(event_key)}>")
         
         if version == "start":
-            dialog_logger.debug(f"running start version of filters on node {active_node}, start filters are {active_node.graph_node.get_graph_start_filters(event_key)}")
+            dialog_logger.debug(f"running start version of filters on node <{id(active_node)}><{active_node.graph_node.id}>, start filters are {active_node.graph_node.get_graph_start_filters(event_key)}")
             node_filters = active_node.graph_node.get_graph_start_filters(event_key)
         else:
             node_filters = active_node.graph_node.get_event_filters(event_key)
@@ -504,168 +505,112 @@ class DialogHandler():
             if active_node.session is not None:
                 self.update_timeout_tracker(active_node.session, old_session_timeout)
         return action_results
-        
-    def _run_transition_filters_on_node(self, active_node:BaseType.BaseNode, event_key:str, event) -> "list[typing.Tuple[str,list,str,list]]":
-        '''
-        runs node's callbacks for filters for transitions and returns the transitions that pass filters. note transitions are split by event
-        Return
-        ---
-        a dictionary of node name to transition to mapped to settings for how to transition.
-        - `count` number of copies of next graph node to create
-        - `actions` list of actions that handle transition to the node named in the key
-        - `session_action` what to do with the session when transitioning
-        - `session_timeout` if there's an adjustment to session timeout specified in yaml
-        - `close_flags` if node and/or session should be closed after handling event according to yaml'''
-        # get all transitions since each event we filter all transitions for that event to see if they work
+    
+    def _run_transition_filters_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
         node_transitions = active_node.graph_node.get_transitions(event_key)
-        passed_transitions:dict[str, dict] = {}
+        passed_transition = None
         for transition_ind, transition in enumerate(node_transitions):
-            dialog_logger.debug(f"starting checking transtion <{transition_ind}>")
-
-            # get list of which nodes can transition to, and base counts of how many to generate (ie read in from yaml, can get modified by counters callbacks)
-            transition_node_counts = BaseType.BaseGraphNode.parse_node_names(transition["node_names"])
-
-            dialog_logger.debug(f"nodes named as next in transition <{transition_ind}> are <{transition_node_counts.keys()}>")
-
-            # parse the close flags so its a more uniform structure
-            transition_close_flag = []
-            if "schedule_close" in transition:
-                transition_close_flag = transition["schedule_close"]
-                if isinstance(transition["schedule_close"], str):
-                    transition_close_flag = [transition_close_flag]
-
+            dialog_logger.debug(f"starting checking transtion number <{transition_ind}>")
+            yaml_named_counts = BaseType.BaseGraphNode.parse_node_names(transition["node_names"])
             if "transition_counters" in transition:
-                count_results = self._counter_runner(copy.deepcopy(transition_node_counts), active_node, event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
+                count_results = self._counter_runner(yaml_named_counts, active_node, event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
+                dialog_logger.debug(f"counters finished executing for transition <{transition_ind}>, counts are {count_results}, to loop through <{count_results.keys()}>")
             else:
-                count_results = transition_node_counts
-            dialog_logger.debug(f"counters finished executing for transition <{transition_ind}>, counts are {count_results}, to loop through <{count_results.keys()}>")
-            # transition actions techinically can cause changes to stored session data.
-            # Want to keep filters for all transitions somewhat similar by making them run on node at same state with same stored data,
-            # so need a clear separation between filtering and callback stages. Running filters then actions for a transition then doing same fot
-            # next transition could cause changes to the filters in later transitions
-            for node_name in count_results.keys():
-                dialog_logger.debug(f"transition <{transition_ind}>, node <{node_name}> running filters")
+                count_results = yaml_named_counts
+                dialog_logger.debug(f"no counters for transition <{transition_ind}>, counts are {count_results}, to loop through <{count_results.keys()}>")
+            
+            # clean up counts
+            for node_name in list(count_results.keys()):
                 if node_name not in self.graph_node_indexer:
                     execution_reporting.warning(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> transition won't work, goal node doesn't exist. transition indexed <{transition_ind}>")
-                    continue
-   
-                if "transition_filters" in transition:
-                    execution_reporting.debug(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}> has transition filters {transition['transition_filters']}")
-                    try:
-                        filter_res = self._filter_list_runner(active_node, event, transition["transition_filters"], POSSIBLE_PURPOSES.TRANSITION_FILTER, node_name)
-                        # transition_filter_helper(self, active_node, event, node_name, transition["transition_filters"])
-                        if isinstance(filter_res, bool) and filter_res:
-                            execution_reporting.debug("filter list result was true, adding tracking")
-                            to_add = {
-                                "count": count_results[node_name],
-                                "actions": transition["transition_actions"] if "transition_actions" in transition else [],
-                                "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
-                                                if "session_chaining" in transition else "end",
-                                "session_timeout": None if "session_chaining" not in transition or isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
-                                "close_flags": transition_close_flag,
-                            }
-                            passed_transitions[node_name] = to_add
-                            dialog_logger.debug(f"transition indexed <{transition_ind}> tracking is <{passed_transitions[node_name]}>")
-                    except Exception as e:
-                        execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>. assuming skip")
-                        dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{node_name}>, details {e}")
-                else:
-                    dialog_logger.debug(f"transition indexed <{transition_ind}> does not have filters, auto pass")
-                    to_add = {
-                        "count": count_results[node_name],
-                        "actions": transition["transition_actions"] if "transition_actions" in transition else [],
-                        "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
+                    del count_results[node_name]
+            
+            # running filters on this transtition
+            filter_res = True
+            if "transition_filters" in transition:
+                execution_reporting.debug(f"active node <{id(active_node)}><{active_node.graph_node.id}> to <{count_results}> has transition filters {transition['transition_filters']}")
+                try:
+                    filter_res = self._filter_list_runner(active_node, event, transition["transition_filters"], POSSIBLE_PURPOSES.TRANSITION_FILTER, goal_node=count_results)
+                    if not isinstance(filter_res, bool):
+                        filter_res = False
+                except Exception as e:
+                    filter_res = False
+                    execution_reporting.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{count_results}>. assuming skip")
+                    dialog_logger.error(f"exception happened when trying to filter transitions from node <{id(active_node)}><{active_node.graph_node.id}> to <{count_results}>, details {e}")
+            
+            if filter_res:
+                transition_close_flag = []
+                if "schedule_close" in transition:
+                    transition_close_flag = transition["schedule_close"]
+                    if isinstance(transition["schedule_close"], str):
+                        transition_close_flag = [transition_close_flag]
+                passed_transition = {
+                    "count": count_results,
+                    "actions": transition["transition_actions"],
+                    "session_action": (transition["session_chaining"] if isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].keys())[0])
                                     if "session_chaining" in transition else "end",
-                        "session_timeout": None if "session_chaining" not in transition or isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
-                        "close_flags": transition_close_flag
-                    }
-                    passed_transitions[node_name] = to_add
-                    dialog_logger.debug(f"transition indexed <{transition_ind}> tracking is <{passed_transitions[node_name]}>")         
-            dialog_logger.debug(f"checking transitions got to end of transition <{transition_ind}> node names")
-        dialog_logger.debug(f"passed transitions are <{passed_transitions.keys()}>")
-        return passed_transitions
-
+                    "session_timeout": None if "session_chaining" not in transition or isinstance(transition["session_chaining"], str) else list(transition["session_chaining"].values())[0],
+                    "close_flags": transition_close_flag,
+                }
+                return passed_transition
+        return None
+        
     async def _run_transitions_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
-        '''handles going through transition to new node (not including closing current one if needed) for one node and event pair'''
-
-        passed_transitions = self._run_transition_filters_on_node(active_node, event_key, event)
-        dialog_logger.debug(f"transitions for node <{id(active_node)}><{active_node.graph_node.id}> that passed filters are for nodes <{[ node_name + ' ' + str(settings['count']) + ' copies' for node_name, settings in passed_transitions.items()]}>, now starting transitions")
-
-        # gathering info about what wants to be done to session by all passed transitions
-        passed_session_actions = {}
-        dialog_logger.debug(f"gathering passed transitions' settings for handling of session for node <{id(active_node)}><{active_node.graph_node.id}>")
-        for next_node_name, passed_transition in passed_transitions.items():
-            if passed_transition["session_action"] not in passed_session_actions:
-                passed_session_actions[passed_transition["session_action"]] = []
-            passed_session_actions[passed_transition["session_action"]].append({"timeout_setting": passed_transition["session_timeout"], "next_nodes": next_node_name})
-        dialog_logger.debug(f"passed transitions' settings for handling of session for node <{id(active_node)}><{active_node.graph_node.id}> are <{passed_session_actions}>")
+        passed_transition = self._run_transition_filters_on_node(active_node, event_key, event)
+        if passed_transition is None:
+            return {"node": False, "session": False}
+        dialog_logger.debug(f"transitions for node <{id(active_node)}><{active_node.graph_node.id}> that passed filters are for nodes <{passed_transition['count']}>, now starting transitions")
 
         section_exceptions = []
-
-        # first pass is setting up active nodes and sessions for callbacks to work on
-        callbacks_list:list[typing.Tuple[BaseType.BaseNode, list]] = []
-        resulting_close_flags = {"node":False, "session":False}
-        for next_node_name, passed_transition in passed_transitions.items():
-            for i in range(passed_transition["count"]):
+        callbacks_list:list[typing.Tuple[BaseType.BaseNode, list, int]] = []
+        # first pass is setting up active nodes and sessiosn for callbacks to work on
+        session_action = passed_transition["session_action"]
+        session_timeout = passed_transition["session_timeout"]
+        for next_node_name, count in passed_transition["count"].items():
+            for i in range(count):
                 session = None
-                yaml_session_setting = passed_transition["session_action"]
-                session_timeout = passed_transition["session_timeout"]
-                if yaml_session_setting == "start" or (yaml_session_setting == "chain" and active_node.session is None):
+                if session_action == "start" or (session_action == "chain" and active_node.session is None):
                     dialog_logger.info(f"starting session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{next_node_name}>")
                     if session_timeout is not None:
                         session = SessionData.SessionData(timeout_duration=timedelta(seconds=session_timeout))
                     else:
                         session = SessionData.SessionData()
                     dialog_logger.debug(f"session debugging, started new session, id is <{id(session)}>")
-                elif yaml_session_setting in ["chain", "section"] and active_node.session is not None:
+                elif session_action in ["chain", "section"] and active_node.session is not None:
                     if session_timeout is not None:
                         old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session.timeout is not None else None
                         active_node.session.set_TTL(timeout_duration=timedelta(seconds=session_timeout))
                         self.update_timeout_tracker(active_node.session, old_session_timeout)
-                    # None means no changes
+                        session = active_node.session
+                elif session_action != "end":
                     session = active_node.session
-                elif yaml_session_setting != "end":
-                    session = active_node.session
-                # what is session set to at this point:
-                # end always has session=None
-                # start always fresh session data
-                # chain can have fresh session or this node's which is none or existing
-                # section has this node's which is none or existing
+            next_node = self.graph_node_indexer.get_ref(next_node_name).activate_node(session)
+            if session_action == "section" and session is not None:
+                # not the complete list of all nodes created. might miss sone when ending session, might have extra when starting session but at least covers all that would be in the session about to be sectioned
+                section_exceptions.append(next_node)
+            execution_reporting.info(f"activated next node, is of graph node <{next_node_name}>, copy number <{i + 1}> id'd <{id(next_node)}>")
+            if session_action != "end" and session is not None:
+                # only end doesn't want node added to session
+                dialog_logger.info(f"adding next node to session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{next_node_name}>")
+                session.add_node(next_node)
+                dialog_logger.info(f"session debugging, session being chained. id <{id(session)}>, adding node <{id(next_node)}><{next_node.graph_node.id}> to it, now node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
+            callbacks_list.append((next_node, passed_transition["actions"], i))
 
-                next_node = self.graph_node_indexer.get_ref(next_node_name).activate_node(session)
-                if "section" in passed_session_actions and session is not None:
-                    # not the complete list of all nodes created. might miss sone when ending session, might have extra when starting session but at least covers all that would be in the session about to be sectioned
-                    section_exceptions.append(next_node)
-                execution_reporting.info(f"activated next node, is of graph node <{next_node_name}>, copy number <{i + 1}> id'd <{id(next_node)}>")
-                if yaml_session_setting != "end" and session is not None:
-                    # only end doesn't want node added to session
-                    dialog_logger.info(f"adding next node to session for transition from node id'd <{id(active_node)}><{active_node.graph_node.id}> to goal <{next_node_name}>")
-                    session.add_node(next_node)
-                    dialog_logger.info(f"session debugging, session being chained. id <{id(session)}>, adding node <{id(next_node)}><{next_node.graph_node.id}> to it, now node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
-                
-                close_flag = passed_transition["close_flags"]
-                resulting_close_flags["node"] = resulting_close_flags["node"] or ("node" in close_flag)
-                resulting_close_flags["session"] = resulting_close_flags["session"] or ("session" in close_flag)
-                callbacks_list.append((next_node, passed_transition["actions"], passed_transition["count"]))
-
-        #NOTE: for multiple passed transitions the node data could be different at the start of each transition action's call
         for callback_settings in callbacks_list:
-            # don't need to keep track of old node timeout because this is a new active node.
-            section_data = self.generate_action_section_data({"copy":callback_settings[2]})
+            section_data = self.generate_action_control_data({"copy":callback_settings[2]})
             old_session_timeout = copy.deepcopy(callback_settings[0].session.timeout) if callback_settings[0].session is not None and callback_settings[0].session.timeout is not None else None
-            await self._action_list_runner(active_node, event, callback_settings[1], POSSIBLE_PURPOSES.TRANSITION_ACTION, goal_node=callback_settings[0], section_data=section_data)
+            await self._action_list_runner(active_node, event, callback_settings[1], POSSIBLE_PURPOSES.TRANSITION_ACTION, goal_node=callback_settings[0], control_data=section_data, section_name="transition_actions")
             if callback_settings[0].session is not None and id(callback_settings[0].session) in self.timeouts_tracker:
                 self.update_timeout_tracker(callback_settings[0].session, old_session_timeout)
             await self._track_new_active_node(callback_settings[0], event)
             dialog_logger.debug(f"checking session data for next node, {callback_settings[0].session}")
-
-        if "section" in passed_session_actions and active_node.session is not None:
-            # only want section to happen once for however many trantions get run
-            dialog_logger.debug(f"sectioning session <{id(session)}> current nodes are <{[f'<{id(exc)}><{exc.graph_node.id}>' for exc in session.get_linked_nodes()]}> exceptions are <{[f'<{id(exc)}><{exc.graph_node.id}>' for exc in section_exceptions]}>")
+        
+        if session_action == "section" and active_node.session is not None:
             await self.clear_session_history(active_node.session, exceptions=section_exceptions)
-        return resulting_close_flags
+        
+        return {"node": "node" in  passed_transition["close_flags"], "session": "session" in  passed_transition["close_flags"]}
 
-     
+
     '''#############################################################################################
     ################################################################################################
     ####                   I-DONT-REALLY-HAVE-A-NAME-BUT-IT-DOESNT-FIT-ELSEWHERE SECTION
@@ -696,7 +641,7 @@ class DialogHandler():
         #     await self.close_node(active_node, timed_out=False)
 
 
-    async def close_node(self, active_node:BaseType.BaseNode, timed_out=False, emergency_remove = False):
+    async def close_node(self, active_node:BaseType.BaseNode, timed_out=False, emergency_remove=False):
         '''Goes through handler's process to close the given node. Calls the custom close callbacks if not emergency close mode, then removes node from
         internal trackers
         
@@ -775,7 +720,7 @@ class DialogHandler():
     ################################################################################################
     ################################################################################################'''
 
-    def generate_action_section_data(self, addons=None):
+    def generate_action_control_data(self, addons=None):
         section_data = {"close_node": False, "close_session": False}
         if addons:
             if isinstance(addons, dict):
@@ -783,7 +728,7 @@ class DialogHandler():
         return section_data
 
 
-    async def _action_list_runner(self, active_node:BaseType.BaseNode, event, action_list, purpose: POSSIBLE_PURPOSES, goal_node=None, section_data=None):
+    async def _action_list_runner(self, active_node:BaseType.BaseNode, event, action_list, purpose: POSSIBLE_PURPOSES, goal_node=None, control_data=None, section_name="actions"):
         '''helper for running a section of action callbacks.
 
         As of v3.7 each section of action callbacks in yaml has a separate data structure for intermediary values.
@@ -792,37 +737,44 @@ class DialogHandler():
         Return
         ---
         dict results from callbacks that would affect system. currently holds `close_node` and `close_session`, both default to False'''
-        if section_data is None:
+        if control_data is None:
             # object meant for temp just passing data to rest of functions in this section.
-            section_data = self.generate_action_section_data()
+            control_data = self.generate_action_control_data()
+        section_data = {}
         for callback in action_list:
             if isinstance(callback, str):
                 # is just function name, no parameters
-                await self._run_func_async(callback, purpose, active_node, event, goal_node=goal_node, callb_section_data=section_data)
+                await self._run_func_async(callback, purpose, active_node, event, goal_node=goal_node, callb_section_data=section_data, control_data=control_data, section_name=section_name)
             else:
                 key = list(callback.keys())[0]
                 value = callback[key]
-                await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, values=value, callb_section_data=section_data)
-
-        return section_data
+                await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, control_data=control_data, section_name=section_name)
+        return control_data
     
-    def _counter_runner(self, yaml_count, active_node:BaseType.BaseNode, event, action_list, purpose: POSSIBLE_PURPOSES):
+    def _counter_runner(self, yaml_count, active_node:BaseType.BaseNode, event, action_list, purpose:POSSIBLE_PURPOSES):
+        section_data = {}
         for callback in action_list:
             if isinstance(callback, str):
                 # is just function name, no parameters
-                self._run_func(callback, purpose, active_node, event, callb_section_data=yaml_count)
+                self._run_func(callback, purpose, active_node, event, callb_section_data=section_data, section_name="transition_counters", control_data=yaml_count)
             else:
                 key = list(callback.keys())[0]
                 value = callback[key]
-                self._run_func(key, purpose, active_node, event, values=value, callb_section_data=yaml_count)
+                self._run_func(key, purpose, active_node, event, base_parameter=value, callb_section_data=section_data, section_name="transition_counters", control_data=yaml_count)
+            # cleanup the control data to what is expected
+            for item in list(yaml_count.keys()):
+                if not isinstance(yaml_count[item], int):
+                    del yaml_count[item]
         return yaml_count
 
 
     def _filter_list_runner(self, active_node:BaseType.BaseNode, event, filter_list, purpose:POSSIBLE_PURPOSES,
                            goal_node=None, operator="and", section_data=None):
-        '''helper for running a section of filter callbacks for given purpose node and event. list of functions can have nested lists, but the keys for those
-        nested lists have to be 'and' or 'or', which are built in keywords for doing boolean operations on the nested function names. Otherwise it treats it as parameters to pass
-        to the function named by the key.
+        '''
+        helper for running a section of filter callbacks for given purpose, node, and event. 
+        List of filter functions can have nested lists, but the keys for those nested lists have to be 'and' or 'or', which are built in keywords for 
+        doing boolean operations on the nested function names. 
+        Otherwise it treats the value as parameters to pass to the function named by the key.
         
         As of v3.7 each section of filters in yaml has a separate data structure for intermediary values (nested lists do not count as seperate sections for this functionalty)
         Intermediary values are not stored in node and are discarded after section finishes executing but can be accessed by any callback in that section
@@ -833,50 +785,59 @@ class DialogHandler():
         if section_data is None:
             # object meant for temp just passing datat to rest of functions in this section.
             section_data = {}
+        section_name = "filters" if purpose.value == POSSIBLE_PURPOSES.FILTER else "transition_filters"
+        #TODO: figure out section progress data structure
 
-        for filter in filter_list:
-            if isinstance(filter, str):
-                # is just function name, no parameters
-                filter_run_result = self._run_func(func_name=filter, purpose=purpose, active_node=active_node, event=event, goal_node=goal_node, callb_section_data=section_data)
-                if not isinstance(filter_run_result, bool):
-                    filter_run_result = False
-            else:
-                # is a dict representing function call with arguments or nested operator, should only have one key:value pair
-                key = list(filter.keys())[0]
-                value = filter[key]
-                if key in ["and", "or"]:
-                    # special keywords that aren't function names and special meaning to handler
-                    filter_run_result = self._filter_list_runner(active_node, event, value, purpose, goal_node, operator=key, section_data=section_data)
-                else:
-                    # argument in vlaue is expected to be one object. a list, a dict, a string etc
-                    filter_run_result = self._run_func(key, purpose, active_node, event, goal_node=goal_node, values=value, callb_section_data=section_data)
+        def recur_list_helper(func_sub_list, operator):
+            for filter in func_sub_list:
+                if isinstance(filter, str):
+                    # is just function name, no parameters
+                    filter_run_result = self._run_func(func_name=filter, purpose=purpose, active_node=active_node, event=event, goal_node=goal_node, callb_section_data=section_data, section_name=section_name)
                     if not isinstance(filter_run_result, bool):
                         filter_run_result = False
-            # find if hit early break because not possible to change result with rest of list
-            if operator == "and" and not filter_run_result:
-                return False
-            if operator == "or" and filter_run_result:
+                else:
+                    # is a dict representing function call with arguments or nested operator, should only have one key:value pair
+                    key = list(filter.keys())[0]
+                    value = filter[key]
+                    if key in ["and", "or"]:
+                        # special keywords that aren't function names and special meaning to handler
+                        # filter_run_result = self._filter_list_runner(active_node, event, value, purpose, goal_node, operator=key, section_data=section_data)
+                        filter_run_result = recur_list_helper(value, operator=key)
+                    else:
+                        # argument in vlaue is expected to be one object. a list, a dict, a string etc
+                        filter_run_result = self._run_func(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, section_name=section_name)
+                        if not isinstance(filter_run_result, bool):
+                            filter_run_result = False
+                # find if hit early break because not possible to change result with rest of list
+                if operator == "and" and not filter_run_result:
+                    return False
+                if operator == "or" and filter_run_result:
+                    return True
+            # end of for loop, means failed to find early break point
+            if operator == "and":
                 return True
-        # end of for loop, means failed to find early break point
-        if operator == "and":
-            return True
-        if operator == "or":
-            return False
+            if operator == "or":
+                return False
+        return recur_list_helper(filter_list, operator)
 
     async def _run_func_async(self, func_name:str, purpose:POSSIBLE_PURPOSES, active_node:BaseType.BaseNode, event,
-                             goal_node:typing.Union[BaseType.BaseNode, str]=None, values=None, callb_section_data=None):
-        '''helper for running a dialog callback that could be async. awaits result if asynchronous.
-        func_name and purpose is for checking information on formatting, rest are values that dialog callbacks need'''
+                             goal_node:typing.Union[BaseType.BaseNode, str]=None, base_parameter=None, callb_section_data=None,
+                             section_name="", control_data=None, section_progress=None):
+        '''helper for setup and running a dialog callback that could be async. awaits result if asynchronous.
+        check `_run_func` for details on parameters'''
         run_func_built = self._run_func(func_name=func_name, purpose=purpose, active_node=active_node, event=event,
-                                       goal_node=goal_node, values=values, callb_section_data=callb_section_data)
+                                       goal_node=goal_node, base_parameter=base_parameter, callb_section_data=callb_section_data,
+                                       section_name=section_name, control_data=control_data, section_progress=section_progress)
         if inspect.isawaitable(run_func_built):
             return await run_func_built
         return run_func_built
     
     def _run_func(self, func_name:str, purpose:POSSIBLE_PURPOSES, active_node:BaseType.BaseNode, event, 
-                 goal_node:typing.Union[BaseType.BaseNode, str]=None, values=None, callb_section_data=None):
-        '''helper for running a dialog callback. func_name and purpose is for checking information on formatting,
-        rest are values that dialog callbacks need'''
+                 goal_node:"typing.Union[BaseType.BaseNode, dict[str,int]]"=None, base_parameter=None, callb_section_data=None, section_name="", control_data=None, section_progress=None):
+        '''helper for setup and running a single callback. 
+        func_name and purpose is for checking information on formatting, rest are values that dialog callbacks need
+        Base parameter expected to be what is read in from yaml. Will be deep copied if there is data.
+        section and control data are assumed to be managed by caller, which is usually the function section handlers'''
         if not self.function_is_permitted(func_name, purpose):
             dialog_logger.debug(f"Dialog handler id'd <{id(self)}> tried running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>, not allowed")
             if purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
@@ -887,15 +848,18 @@ class DialogHandler():
                 return None
         dialog_logger.debug(f"Dialog handler id'd <{id(self)}> starting running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>")
         func_ref = self.functions_cache.get(func_name)[0]["ref"]
-        parameters = CbUtils.CallbackDatapack(
-                                              active_node=active_node,
-                                              event=event,
-                                              parameter=copy.deepcopy(values) if values is not None else None,
-                                              goal_node_name=goal_node if isinstance(goal_node, str) else None,
-                                              goal_node=goal_node if not isinstance(goal_node, str) else None,
-                                              function_data=callb_section_data,
-                                              **self.pass_to_callbacks)
-        return func_ref(parameters)
+        datapack = CbUtils.CallbackDatapack(
+                                            active_node=active_node,
+                                            event=event,
+                                            base_parameter=copy.deepcopy(base_parameter) if base_parameter is not None else None,
+                                            goal_node_name=goal_node if isinstance(goal_node, str) else None,
+                                            goal_node=goal_node if not isinstance(goal_node, str) else None,
+                                            section_name=section_name,
+                                            section_data=callb_section_data if callb_section_data else {},
+                                            control_data=control_data if control_data else {},
+                                            section_progress=section_progress if section_progress else {},
+                                            **self.pass_to_callbacks)
+        return func_ref(datapack)
     
     '''#############################################################################################
     ################################################################################################

@@ -13,7 +13,7 @@ def save_survey_answer(data:cbUtils.CallbackDatapack):
     active_node:DiscordNodeType.DiscordNode = data.active_node
     goal_node:DiscordNodeType.DiscordNode = data.goal_node
     event = data.event
-    settings = data.parameter
+    settings = data.base_parameter
 
     target_locations = settings["save_locations"]
     survey_name = settings["survey_name"]
@@ -48,12 +48,12 @@ cbUtils.set_callback_settings(save_survey_answer, allowed_sections=[POSSIBLE_PUR
 async def report_survey_ansers(data:cbUtils.CallbackDatapack):
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    settings = data.parameter
+    settings = data.base_parameter
     
     if active_node.session is None:
         return
     message_to_send = "Here is what you responded:\n"+ "\n".join([k+": "+str(v) for k,v in active_node.session.data[settings["survey_name"]].items()])
-    data.parameter = {"ping_with_reply": True, "message":{"content":message_to_send}, "menu_name": settings["survey_name"]+"_report"}
+    data.base_parameter = {"ping_with_reply": True, "message":{"content":message_to_send}, "menu_name": settings["survey_name"]+"_report"}
     await DiscordFuncs.send_message(data)
 cbUtils.set_callback_settings(report_survey_ansers, allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter='always', schema={"type": "object", "properties":{ 
     "survey_name": {"type": "string"}}, "required": ["survey_name"]
