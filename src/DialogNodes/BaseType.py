@@ -781,6 +781,8 @@ class BaseNode:
             self.timeout = datetime.utcnow() + timeout_duration
 
     def time_left(self) -> timedelta:
+        if self.timeout is None:
+            return None
         return self.timeout - datetime.utcnow()
 
     def activate(self):

@@ -54,6 +54,8 @@ class SessionData:
 
     def time_left(self) -> timedelta:
         '''returns the difference between session timeout and current time'''
+        if self.timeout is None:
+            return None
         return self.timeout - datetime.utcnow()
     
     def activate(self):
