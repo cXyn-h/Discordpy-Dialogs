@@ -70,7 +70,7 @@ def merge_overrides(base, override):
         result = override
     return result
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type":"object", "properties":{
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional", schema={"type":"object", "properties":{
     "grab_location": {
         "type": "string",
         "description": "what to grab from event",
@@ -95,7 +95,7 @@ def transfer_data(data:cbUtils.CallbackDatapack):
         del data.section_data[func_override_key]
     section_parameter = merge_overrides(data.base_parameter, section_overrides)
     grab_location_name = section_parameter["grab_location"]
-    save_locations = section_parameter("save_locations")
+    save_locations = section_parameter["save_locations"]
 
     if grab_location_name is None or save_locations is None:
         return
@@ -104,8 +104,8 @@ def transfer_data(data:cbUtils.CallbackDatapack):
     if grab_location is None:
         return
     split_grab = grab_location_name.split(".")
-    grab_location = DotNotator.parse_dot_notation_string(split_grab[1:-1], grab_location, None)
-    save_data = DotNotator.parse_dot_notation_string(split_grab[-1], grab_location, None)
+    grab_location = DotNotator.parse_dot_notation(split_grab[1:-1], grab_location, None)
+    save_data = DotNotator.parse_dot_notation(split_grab[-1:], grab_location, None)
 
     handle_save_data(save_data, save_locations, data)
 

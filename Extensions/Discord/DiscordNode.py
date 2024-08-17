@@ -75,6 +75,18 @@ class DiscordNode(BaseNode):
         for message_info in self.managed_replies_info:
             if message_info.message.id == message_id:
                 return "reply"
+            
+    def get_menu_info(self, menu_name):
+        return self.menu_messages_info.get(menu_name, None)
+    
+    def get_tracked_info(self, message_id):
+        for message_info in self.menu_messages_info.values():
+            if message_info.message.id == message_id:
+                return message_info
+        for message_info in self.managed_replies_info:
+            if message_info.message.id == message_id:
+                return message_info
+        return None
 
     def close(self):
         super().close()
