@@ -81,9 +81,9 @@ class CallbackDatapack():
         self.goal_node = goal_node
         self.base_parameter = base_parameter
         self.section_name = section_name
-        self.section_data = section_data if section_data else {}
-        self.control_data = control_data if control_data else {}
-        self.section_progress = section_progress if section_progress else {}
+        self.section_data = section_data if section_data is not None else {}
+        self.control_data = control_data if control_data is not None else {}
+        self.section_progress = section_progress if section_progress is not None else {}
 
         for option, data in kwargs.items():
             setattr(self, option, data)

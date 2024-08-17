@@ -475,13 +475,19 @@ required: ["id"]
         if event_type in self.events and "schedule_close" in self.events[event_type]:
             return copy.deepcopy(self.events[event_type]["schedule_close"])
         return []
+    
+    def has_transitions(self, event_type):
+        if event_type in self.events and "transitions" in self.events[event_type]:
+            return True
+        else:
+            return False
 
     def get_transitions(self, event_type):
         '''get a copy of settings for handling transitions for event type named by event_type
 
         Return
         ---
-        'list[dict[str, Any]]` - list of settings for transitions for this event type'''
+        `list[dict[str, Any]]` - list of settings for transitions for this event type'''
         if event_type in self.events and "transitions" in self.events[event_type]:
             return copy.deepcopy(self.events[event_type]["transitions"])
         else:
@@ -779,6 +785,8 @@ class BaseNode:
 
     def activate(self):
         self.status = ITEM_STATUS.ACTIVE
+        if self.session is not None:
+            self.session.activate()
 
     def is_active(self):
         return self.status == ITEM_STATUS.ACTIVE

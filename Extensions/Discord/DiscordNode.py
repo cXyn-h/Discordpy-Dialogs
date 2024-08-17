@@ -29,6 +29,7 @@ class DiscordNode(BaseNode):
         self.managed_replies_info.add(message_info)
 
     async def delete_menu_message(self, menu_name):
+        '''deletes the discord message that we have given the specific menu name, and removes from node tracking'''
         if menu_name in self.menu_messages_info:
             message_info = self.menu_messages_info[menu_name]
             if message_info.view is not None:
@@ -39,6 +40,7 @@ class DiscordNode(BaseNode):
             del self.menu_messages_info[menu_name]
 
     async def delete_reply(self, message_id):
+        '''delete the discord message that has the given message id from the list of tracked reply message.'''
         # go find message to delete
         for reply in self.managed_replies_info:
             if reply.message.id == message_id:
@@ -52,14 +54,21 @@ class DiscordNode(BaseNode):
                 break
 
     async def close_all_menus(self):
+        '''close all the menu messages of this node'''
         for menu in list(self.menu_messages_info.keys()):
             await self.delete_menu_message(menu)
 
     async def delete_all_replies(self):
+        '''delete all managed replies of this node'''
         for reply in list(self.managed_replies_info):
             await self.delete_reply(reply)
 
     def check_tracking(self, message_id):
+        '''check if the given message id belongs to a menu message, managed reply message, or not being tracked by this node at all
+        
+        Returns
+        ---
+        `None | "menu" | "reply"` - none if not being tracked, otherwise string denoting which section'''
         for message_info in self.menu_messages_info.values():
             if message_info.message.id == message_id:
                 return "menu"

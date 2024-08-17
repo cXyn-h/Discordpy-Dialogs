@@ -2,13 +2,15 @@ import src.utils.CallbackUtils as cbUtils
 import src.utils.DotNotator as DotNotator
 import src.DialogNodes.BaseType as BaseType
 import random
+import inspect
 from datetime import datetime, timedelta
 from src.utils.Enums import POSSIBLE_PURPOSES
 from enum import Enum
 
 class YAML_SELECTION(Enum):
     EVENT="event"
-    SECTION= "section"
+    SECTION="section"
+    CONTROL="control"
     ACTIVE_NODE="active_node"
     ACTIVE_SESSION= "active_session"
     GOAL_NODE= "goal_node"
@@ -17,6 +19,8 @@ class YAML_SELECTION(Enum):
 REGEX_OR_INPUT_SOURCES = "|".join([choice.value for choice in YAML_SELECTION])
 REGEX_OR_OUTPUT_SOURCES = "|".join([choice.value for choice in YAML_SELECTION if choice not in [YAML_SELECTION.EVENT]])
 NODES_AND_SESSION = [YAML_SELECTION.ACTIVE_NODE, YAML_SELECTION.ACTIVE_SESSION, YAML_SELECTION.GOAL_NODE, YAML_SELECTION.GOAL_SESSION]
+NODES = [YAML_SELECTION.ACTIVE_NODE, YAML_SELECTION.GOAL_NODE]
+SESSIONS = [YAML_SELECTION.ACTIVE_SESSION, YAML_SELECTION.GOAL_SESSION]
 
 def select_from_pack(name, datapack):
     '''uses the vlues of YAML_SELECTION to decide which node, session, section data etc from the datapack to return.
@@ -31,19 +35,21 @@ def select_from_pack(name, datapack):
         location = datapack.section_data
     elif name.startswith(YAML_SELECTION.ACTIVE_NODE.value):
         location = datapack.active_node
-    elif name.startswtih(YAML_SELECTION.ACTIVE_SESSION.value) and datapack.active_node.session is not None:
+    elif name.startswith(YAML_SELECTION.ACTIVE_SESSION.value) and datapack.active_node.session is not None:
         location = datapack.active_node.session.data
     elif name.startswith(YAML_SELECTION.GOAL_NODE.value):
         location = datapack.goal_node
     elif name.startswith(YAML_SELECTION.GOAL_SESSION.value) and datapack.goal_node is not None and datapack.goal_node.session is not None:
         location = datapack.goal_node.session.data
+    elif name.startswith(YAML_SELECTION.CONTROL.value):
+        location = datapack.control_data
     return location
 
 def handle_save_data(save_data, save_locations, datapack):
     for save_location in save_locations:
         location = select_from_pack(save_location, datapack)
         if location is None:
-            return
+            continue
         
         split_names = save_location.split(".")
         location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
@@ -264,6 +270,103 @@ def update_timeout(data:cbUtils.CallbackDatapack):
             time = timedelta(seconds=settings["seconds"])
         goal_node.session.set_TTL(time)
 
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type":"object", "properties":{
+    "grab_location": {
+        "type": "string",
+        "description": "what to grab from event",
+        "pattern": REGEX_OR_INPUT_SOURCES+"(\.[\w\d]*)+"
+    },
+    "save_locations": {
+        "type": "array",
+        "items": {
+            "type": "string",
+            "description": "where to save grabbed data",
+            "pattern": REGEX_OR_OUTPUT_SOURCES+"(\.[\w\d]*)+"
+        }
+    }
+}})
+async def call_on_object(data:cbUtils.CallbackDatapack):
+    func_override_key = "call_on_object_override"
+    section_overrides = data.section_data.get(func_override_key, {})
+    if func_override_key in data.section_data:
+        del data.section_data[func_override_key]
+    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    grab_location_name = section_parameter["grab_location"]
+    save_locations = section_parameter("save_locations")
+
+    if grab_location_name is None or save_locations is None:
+        return
+
+    grab_location = select_from_pack(grab_location_name, data)
+    if grab_location is None:
+        return
+    split_grab = grab_location_name.split(".")
+    grab_location = DotNotator.parse_dot_notation_string(split_grab[1:], grab_location, None)
+    if inspect.isawaitable(grab_location):
+        save_data = await grab_location()
+    save_data = grab_location()
+
+    handle_save_data(save_data, save_locations, data)
+
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type":"object", "properties":{
+    "location": {
+        "type": "string",
+        "description": "what to grab from event",
+        "pattern": REGEX_OR_INPUT_SOURCES+"(\.[\w\d]*)+"
+    }
+}})
+def delete_data(data:cbUtils.CallbackDatapack):
+    func_override_key = "delete_data_override"
+    section_overrides = data.section_data.get(func_override_key, {})
+    if func_override_key in data.section_data:
+        del data.section_data[func_override_key]
+    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    grab_location_name = section_parameter["location"]
+
+    if grab_location_name is None:
+        return
+    
+    grab_location = select_from_pack(grab_location_name, data)
+    if grab_location is None:
+        return
+    split_grab = grab_location_name.split(".")
+    grab_location = DotNotator.parse_dot_notation_string(split_grab[1:-1], grab_location, None)
+    save_data = DotNotator.parse_dot_notation_string(split_grab[-1], grab_location, None)
+
+    if issubclass(grab_location.__class__, BaseType.BaseNode):
+        delattr(grab_location, split_grab[-1], save_data)
+    elif isinstance(grab_location, dict):
+        del grab_location[split_grab[-1]]
+
+@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], has_parameter="always", schema={
+    "type": "string",
+    "description": "what to grab from event",
+    "pattern": REGEX_OR_INPUT_SOURCES+"(\.[\w\d]*)+"
+})
+def has_data(data:cbUtils.CallbackDatapack):
+    func_override_key = "has_data_override"
+    location_name = data.base_parameter
+    if func_override_key in data.section_data:
+        location_name = data.section_data[func_override_key]
+        del data.section_data[func_override_key]
+
+    if location_name is None:
+        return
+    
+    obj = select_from_pack(location_name, data)
+    if obj is None:
+        return
+    split_grab = location_name.split(".")
+    obj = DotNotator.parse_dot_notation_string(split_grab[1:-1], obj, None)
+
+    if obj:
+        if issubclass(obj.__class__, BaseType.BaseNode):
+            return split_grab[-1] in vars(obj)
+        elif isinstance(obj, dict):
+            return split_grab[-1] in obj
+    return False
+
+
 @cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
 def always_false_filter(data:cbUtils.CallbackDatapack):
     return False
@@ -276,5 +379,7 @@ def always_true_filter(data:cbUtils.CallbackDatapack):
 def debugging_action(data:cbUtils.CallbackDatapack):
     print(f"DEBUGGING ACTION!! For node <{id(data.active_node)}><{data.active_node.graph_node.id}> event <{id(data.event)}><{type(data.event)}>")
 
-dialog_func_info = {transfer_data:{}, always_false_filter:{}, always_true_filter:{}, debugging_action:{}, save_data:{}, random_chance:{}, simple_compare:{}, increment_value:{}, update_timeout:{}}
+dialog_func_info = {transfer_data:{}, always_false_filter:{}, always_true_filter:{}, debugging_action:{},
+                    save_data:{}, random_chance:{}, simple_compare:{}, increment_value:{}, update_timeout:{},
+                    call_on_object:{}, delete_data:{}, has_data:{}}
 
