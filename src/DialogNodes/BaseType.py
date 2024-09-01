@@ -9,6 +9,7 @@ import copy
 from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
 import src.utils.Cache as Cache
+import src.utils.ValidationUtils as ValidationUtils
 import src.utils.DotNotator as DotNotator
 
 class BaseGraphNode:
@@ -169,7 +170,7 @@ required: ["id"]
     '''
     TYPE="Base"
 
-    def validate_node(self):
+    def get_validation_info(self):
         #TODO: feels clunkly. reevaluate what does need to be validated here (probably at least a way to check if functions needed and nodes to go to are actually in handler)
         #  (what about the rest of node definition? think it should have been validated on edits)
         unique_next_nodes = set()
@@ -179,26 +180,27 @@ required: ["id"]
                 if settings is None:
                     continue
                 if "setup" in settings:
-                    function_set_list.append((settings["setup"], self.id, POSSIBLE_PURPOSES.ACTION, "graph start setup", event_type))
+                    function_set_list.append(ValidationUtils.FunctionSectionInfo(settings["setup"], self.id, POSSIBLE_PURPOSES.ACTION, "graph start setup for event {et}".format(et=event_type), event_type))
                 if "filters" in settings:
-                    function_set_list.append((settings["filters"], self.id, POSSIBLE_PURPOSES.FILTER, "graph start filters", event_type))
-        function_set_list.append((self.actions, self.id, POSSIBLE_PURPOSES.ACTION, "node enter actions"))
+                    function_set_list.append(ValidationUtils.FunctionSectionInfo(settings["filters"], self.id, POSSIBLE_PURPOSES.FILTER, "graph start filters for event {et}".format(et=event_type), event_type))
+        function_set_list.append(ValidationUtils.FunctionSectionInfo(self.actions, self.id, POSSIBLE_PURPOSES.ACTION, "node enter actions"))
+        function_set_list.append(ValidationUtils.FunctionSectionInfo(self.close_actions, self.id, POSSIBLE_PURPOSES.ACTION, "node close actions"))
         for event_type, settings in self.events.items():
             if "filters" in settings:
-                function_set_list.append((settings["filters"], self.id, POSSIBLE_PURPOSES.FILTER, f"node {event_type} event filters", event_type))
+                function_set_list.append(ValidationUtils.FunctionSectionInfo(settings["filters"], self.id, POSSIBLE_PURPOSES.FILTER, f"node {event_type} event filters", event_type))
             if "actions" in settings:
-                function_set_list.append((settings["actions"], self.id, POSSIBLE_PURPOSES.ACTION, f"node {event_type} event actions", event_type))
+                function_set_list.append(ValidationUtils.FunctionSectionInfo(settings["actions"], self.id, POSSIBLE_PURPOSES.ACTION, f"node {event_type} event actions", event_type))
             if "transitions" in settings:
                 for transition_num, transition_settings in enumerate(settings["transitions"]):
                     next_nodes_count = BaseGraphNode.parse_node_names(transition_settings["node_names"])
                     for next_node in next_nodes_count:
                         unique_next_nodes.add(next_node)
                     if "tansition_counters" in transition_settings:
-                        function_set_list.append((transition_settings["transition_counters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_COUNTER, f"node {event_type} event  index {transition_num} transition counters", event_type))
+                        function_set_list.append(ValidationUtils.FunctionSectionInfo(transition_settings["transition_counters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_COUNTER, f"node {event_type} event index {transition_num} transition counters", event_type))
                     if "transition_filters" in transition_settings:
-                        function_set_list.append((transition_settings["transition_filters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_FILTER, f"node {event_type} event  index {transition_num} transition filters", event_type))
+                        function_set_list.append(ValidationUtils.FunctionSectionInfo(transition_settings["transition_filters"],  self.id, POSSIBLE_PURPOSES.TRANSITION_FILTER, f"node {event_type} event index {transition_num} transition filters", event_type))
                     if "transition_actions" in transition_settings:
-                        function_set_list.append((transition_settings["transition_actions"], self.id, POSSIBLE_PURPOSES.TRANSITION_ACTION, f"node {event_type} event index {transition_num} transition actions", event_type))
+                        function_set_list.append(ValidationUtils.FunctionSectionInfo(transition_settings["transition_actions"], self.id, POSSIBLE_PURPOSES.TRANSITION_ACTION, f"node {event_type} event index {transition_num} transition actions", event_type))
         return unique_next_nodes, function_set_list
 
     def __init__(self, options:dict) -> None:

@@ -12,22 +12,22 @@ import inspect
 import typing
 # copying GraphNode settings to protect objects
 import copy
-
-import src.DialogNodeParsing as nodeParser
-
-import src.utils.CallbackUtils as CbUtils
-import src.BuiltinFuncs.BaseFuncs as BaseFuncs
-# annotating function purposes
-from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE, ITEM_STATUS, TASK_STATE
-
-import src.utils.SessionData as SessionData
-import src.utils.TimeoutTask as TimeoutTask
 # validating function data
 from jsonschema import validate, ValidationError
-# type annotations
-import src.DialogNodes.BaseType as BaseType
 
+import src.DialogNodeParsing as nodeParser
+import src.DialogNodes.BaseType as BaseType
+import src.BuiltinFuncs.BaseFuncs as BaseFuncs
+import src.DialogEvents.ExceptionEvent as ExceptionEvent
+
+import src.utils.CallbackUtils as CbUtils
+# annotating function purposes
+from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE, ITEM_STATUS, TASK_STATE
+import src.utils.SessionData as SessionData
+import src.utils.ValidationUtils as ValidationUtils
 import src.utils.Cache as Cache
+import src.utils.HandlerTasks as HandlerTasks
+import src.utils.TimeString as TimeString
 
 
 dev_log = logging.getLogger('Dev-Handler-Reporting')
@@ -58,9 +58,6 @@ exec_log.setLevel(logging.DEBUG)
 #       This causes a flickering of buttons on discord menu message. Can I get that to not happen somehow? Can i get more info to close node so it can pass it to callbacks about why it's called?
 #       tho at least close_node knowing why it was calle would be good for debugging
 #TODO: make callback permitted purposes more precise
-#TODO: bug timeout as event, if you specify should close in handling it doesn't recognize timeout when closing node anymore
-
-#NOTE: each active node will get a reference to handler. Be careful what callbacks are added as they can mess around with handler itself
 
 # Thoughts:
 #   sapwning multiple active nodes of same graph node, transitions assume different graph nodes
@@ -69,20 +66,44 @@ exec_log.setLevel(logging.DEBUG)
 #   local broad casting event to subset
 # tracking node execution progress
 
+class HandlerSettings:
+    def __init__(self, log_level="warning", strict_event_order=False, task_age:str="5m") -> None:
+        self.log_level = logging.WARNING
+        if log_level == "debug":
+            self.log_level = logging.DEBUG
+        elif log_level == "info":
+            self.log_level = logging.INFO
+        elif log_level == "error":
+            self.log_level = logging.ERROR
+
+        self.strict_event_order = strict_event_order
+        self.task_age = TimeString.string_to_timedelta(task_age)
+        # settings below still experimental
+        self.timeout_cut = False
+        '''EXPERIMENTAL
+        ---
+        if timeout gets to cut event handling line'''
+
+class RunNodeEventOutput:
+    def __init__(self, close_session=None) -> None:
+        '''None means not specified or at a point that it doesn't matter. False is did not say to close, True is need to close'''
+        self.close_session=close_session
+
 class DialogHandler():
-    NON_BROADCASE_EVENTS = ["timeout", "node_error", "node_warning"]
-    def __init__(self, graph_nodes:"typing.Optional[dict[str, BaseType.BaseGraphNode]]"=None, functions=None, settings=None, pass_to_callbacks=None, **kwargs) -> None:
+    NON_BROADCAST_EVENTS = ["timeout", "node_error", "node_warning"]
+    def __init__(self, graph_nodes:"typing.Optional[dict[str, BaseType.BaseGraphNode]]"=None, functions=None, settings:HandlerSettings=None, pass_to_callbacks=None, **kwargs) -> None:
         dev_log.info(f"dialog handler being initialized, id is <{id(self)}>")
         self.graph_node_indexer = Cache.MultiIndexer(
                 cache=graph_nodes,
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: x.TYPE),
-                    Cache.FieldValueIndex("functions", keys_value_finder=lambda x: x.TYPE)
+                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: [x.TYPE]),
+                    Cache.FieldValueIndex("functions", keys_value_finder=lambda x: [x.TYPE]) #TODO: this doesn't work as intended, fix once I figure out functions
                 ]
         )
         '''maps the string node id from yaml to graph node object.'''
         dev_log.debug(f"dialog handler <{id(self)}> initializing with GraphNode cache <{id(self.graph_node_indexer.cache)}> with <{len(self.graph_node_indexer.cache)}> nodes registered")
         dev_log.debug(f"loaded nodes' names are {self.graph_node_indexer.cache.keys()}")
+
         self.functions_cache = Cache.MultiIndexer(cache=functions, input_secondary_indices=[
                 Cache.FieldValueIndex("sections", keys_value_finder=lambda x: x["permitted_purposes"])
             ]
@@ -94,24 +115,26 @@ class DialogHandler():
 
         self.active_node_cache = Cache.MultiIndexer(
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("graph_node", keys_value_finder=lambda x: x.graph_node.id),
-                    Cache.FieldValueIndex("event_forwarding", keys_value_finder=lambda x: [event_type for event_type in x.graph_node.events.keys() if event_type not in DialogHandler.NON_BROADCASE_EVENTS]),
-                    Cache.ObjContainsFieldIndex("session", keys_value_finder=lambda x: x.session)
+                    Cache.FieldValueIndex("graph_node", keys_value_finder=lambda x: [x.graph_node.id]),
+                    Cache.FieldValueIndex("event_forwarding", keys_value_finder=lambda x: [event_type for event_type in x.graph_node.events.keys() if event_type not in DialogHandler.NON_BROADCAST_EVENTS]),
+                    Cache.ObjContainsFieldIndex("has_session", keys_value_finder=lambda x: [x.session])
                 ]
         )
         '''store for all active nodes this handler is in charge of handling events on. is mapping of unique id to a dictionary holding active node object and handler data for it'''
 
-        self.timeouts_tracker = dict()
-
-        self.advanced_event_queue = Cache.MultiIndexer()
-        '''EXPERIMENTAL - trying to consolidate all the possible tasks.'''
-
-        self._event_queue = []
-        #TODO: still need to integrate and use these settings everywhere, especially the reading sections
-        #       but before doing that probably want to think through what reporting will look like, where should reports go: dev, operator, server logs, bot logs?
-        self.settings = copy.deepcopy(settings) if settings is not None else {}
-        if "exception_level" not in self.settings:
-            self.settings["exception_level"] = "ignore"
+        self.advanced_event_queue = Cache.MultiIndexer(
+            input_secondary_indices=[
+                Cache.FieldValueIndex("task_type", keys_value_finder=lambda x: [x.type]),
+                Cache.FieldValueIndex("session_id", keys_value_finder=lambda x: [self.get_session_key(x.session)] if x.type == "SessionEventTask" else []),
+                Cache.FieldValueIndex("node_id", keys_value_finder=lambda x: [self.get_active_node_key(x.active_node)] if x.type == "NodeEventTask" else []),
+                Cache.FieldValueIndex("session_waiters", keys_value_finder=lambda x: [self.get_session_key(x.timeoutable)] if x.type == "TimeoutWaiter" and not issubclass(x.timeoutable.__class__, BaseType.BaseNode) else []),
+                Cache.FieldValueIndex("node_waiters", keys_value_finder=lambda x: [self.get_active_node_key(x.timeoutable)] if x.type == "TimeoutWaiter" and issubclass(x.timeoutable.__class__, BaseType.BaseNode) else []),
+                Cache.FieldValueIndex("session_timeouts", keys_value_finder=lambda x: [self.get_session_key(x.timeoutable)] if x.type == "SessionTimeoutTask" else []),
+                Cache.FieldValueIndex("node_timeouts", keys_value_finder=lambda x: [self.get_active_node_key(x.timeoutable)] if x.type == "NodeTimeoutTask" else [])
+            ]
+        )
+        '''consolidated list of tasks to do by handler'''
+        self.settings = settings if settings is not None else HandlerSettings()
 
         self.cleaning_task = None
 
@@ -170,7 +193,12 @@ class DialogHandler():
         #TODO: maybe clean up and split so this can do minimal work on new nodes? or maybe just wait until someone adds all nodes?
         #TODO: smarter caching of what is validated
 
-        def validate_function_list(func_list, node_id, purpose, string_rep, event_type=None):
+        def validate_function_list(function_section_info:ValidationUtils.FunctionSectionInfo):
+            func_list = function_section_info.function_list
+            node_id = function_section_info.node_id
+            purpose = function_section_info.purpose
+            string_rep = function_section_info.section_name
+            event_type = function_section_info.event_type
             for callback in func_list:
                 if type(callback) is str:
                     func_name = callback
@@ -181,28 +209,32 @@ class DialogHandler():
                 
                 #TODO: check event type and node type once that's implemented
                 if func_name == "or" or func_name == "and" and purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
-                    validate_function_list(args, node_id, purpose, string_rep, event_type=event_type)
+                    validate_function_list(ValidationUtils.FunctionSectionInfo(args, node_id, purpose, string_rep, event_type=event_type))
                     continue
                     
                 if func_name == "not" and purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
-                    validate_function_list(args, node_id, purpose, string_rep, event_type=event_type)
+                    validate_function_list(ValidationUtils.FunctionSectionInfo(args, node_id, purpose, string_rep, event_type=event_type))
                     continue
 
                 if func_name == "if" and purpose in [POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION]:
-                    validate_function_list(args["filters"], node_id, POSSIBLE_PURPOSES.FILTER, string_rep+" filters for if statement", event_type=event_type)
-                    validate_function_list(args["actions"], node_id, purpose, string_rep+" actions for if statement", event_type=event_type)
+                    validate_function_list(ValidationUtils.FunctionSectionInfo(args["filters"], node_id, POSSIBLE_PURPOSES.FILTER, string_rep+" filters for if statement", event_type=event_type))
+                    validate_function_list(ValidationUtils.FunctionSectionInfo(args["actions"], node_id, purpose, string_rep+" actions for if statement", event_type=event_type))
                     continue
 
                 if not self.function_is_permitted(func_name, purpose):
                     raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep} but isn't allowed to run there")
                 # function has to exist at this point because the check checks for that
                 func_ref = self.functions_cache.get(func_name)[0]["ref"]
-                if func_ref.has_parameter == "always" and args is None:
-                    raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, missing required arguments")
-                elif func_ref.has_parameter is None and args is not None:
-                    raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, function not meant to take arguments, extra values passed")
+                # version alpha 3.8 removing checking if missing arguments since arguments can be added/provided during runtime so don't have a complete set just by looking at yaml
+                #   this version added the override checks to a bunch of callbacks after adding section data in previous changes
+                # if func_ref.has_parameter == "always" and args is None:
+                #     raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, missing required arguments")
+                # elif func_ref.has_parameter is None and args is not None:
+                #     raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, function not meant to take arguments, extra values passed")
                 
                 if args is not None:
+                    # if there are args, try to make sure they fit definitions
+                    # args provided at runtime aren't checked
                     try:
                         validate(args, func_ref.schema)
                     except ValidationError as ve:
@@ -217,10 +249,11 @@ class DialogHandler():
 
         explored=set()
         dependent=set()
-        for node_id, graph_node in self.graph_node_indexer.cache.items():
-            next_nodes, function_lists = graph_node.validate_node()
-            for function_list in function_lists:
-                validate_function_list(*function_list)
+        for node_id in self.graph_node_indexer.cache:
+            graph_node:BaseType.BaseGraphNode = self.graph_node_indexer.get(node_id)[0]
+            next_nodes, function_sections_info = graph_node.get_validation_info()
+            for function_section in function_sections_info:
+                validate_function_list(function_section)
             explored.add(node_id)
             if node_id in dependent:
                 dependent.remove(node_id)
@@ -359,7 +392,7 @@ class DialogHandler():
                 session = SessionData.SessionData(timeout_duration=timedelta(seconds=default_session_duration))
             else:
                 session = SessionData.SessionData()
-            dev_log.info(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{id(event)}><{event_key}> start at found node starts with a session, created it. id: <{id(session)}> timeout <{session.timeout}>")
+            dev_log.info(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{id(event)}><{event_key}> start at found node starts with a session, created it. id: <{self.get_session_key(session)}> timeout <{session.timeout}>")
         
         # get active node at this graph node.
         #   design of callbacks is they assume they have an active node to act on. Allowing reusing those for start section (and reducing functions
@@ -369,23 +402,26 @@ class DialogHandler():
             # feels more right to set up session to mirror state of node (knowing of each other) before callbacks happen on them
             # does mean circular reference to clean up
             session.add_node(active_node)
-        dev_log.debug(f"dialog handler id'd <{id(self)}> node <{node_id}> event <{id(event)}><{event_key}> start_at created <{id(active_node)}>, running callbacks")
+        dev_log.debug(f"dialog handler id'd <{id(self)}> node <{node_id}> event <{id(event)}><{event_key}> start_at created active node <{self.get_active_node_key(active_node)}>, running callbacks")
         # some filters may want to depend on session data, which usually gets chance to setup on transition. Startup doesn't get any other chance
         #   than running some callbacks before filters
         # also other sections track timeouts for node and session and various other changes when calling actions, but it doesn't matter here since these haven't been tracked
         #   yet so nothing depends on detecting changes
-        await self._run_actions_on_node(active_node, event_key, event, version="start")
-        dev_log.debug(f"dialog handler id'd <{id(self)}> node <{id(active_node)}><{node_id}> event <{id(event)}><{event_key}> starting custom filter process")
-        start_filters_result = self._run_filters_on_node(active_node, event_key, event, version="start")
-        dev_log.debug(f"dialog handler id'd <{id(self)}> node <{id(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at finished filter process. passed? <{start_filters_result}>")
+        try:
+            await self._run_actions_on_node(active_node, event_key, event, version="start")
+            dev_log.debug(f"dialog handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{node_id}> event <{id(event)}><{event_key}> starting custom filter process")
+            start_filters_result = self._run_filters_on_node(active_node, event_key, event, version="start")
+            dev_log.debug(f"dialog handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at finished filter process. passed? <{start_filters_result}>")
+        except Exception as e:
+            start_filters_result = False
         if not start_filters_result:
             if session is not None:
                 # there's a circular reference by design, break it if it was created and node failed filters so garbage collector can get it
                 session.clear_session_history()
             return None
-        dev_log.debug(f"dialog handler id'd <{id(self)}> node <{id(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at moving to doing node actions and tracking")
+        dev_log.debug(f"dialog handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at moving to doing node actions and tracking")
         await self._track_new_active_node(active_node, event)
-        exec_log.info(f"started active version of <{node_id}>, unique id is <{id(active_node)}>")
+        exec_log.info(f"started active version of <{node_id}>, unique id is <{self.get_active_node_key(active_node)}>")
 
     async def handle_event(self, event_key:str, event):
         '''entrypoint for event happening and getting node responses to event. Once handler is notified, it sends out the event info
@@ -398,18 +434,11 @@ class DialogHandler():
         event - `Any`
             the actual event data. handler itself doesn't care about what type it is, just make sure all the types of callback 
             specified via yaml can handle that type of event'''
-        dev_log.info(f"handler id'd <{id(self)}> has been notified of event happening. event <{id(event)}><{event_key}> oject type <{type(event)}>")
-        waiting_node_keys = self.active_node_cache.get_keys(event_key, index_name="event_forwarding", default=[])
-        dev_log.debug(f"handler id'd <{id(self)}>, event <{id(event)}><{event_key}> nodes waiting for event are <{[f'<{str(id(self.active_node_cache.get_ref(x)))}><{self.active_node_cache.get_ref(x).graph_node.id}>' for x in waiting_node_keys]}>")
-        # don't use gather here, think it batches it so all nodes responding to event have to pass callbacks before any one of them go on to transitions
-        # each node is mostly independent of others for each event and don't want them to wait for another node to finish
-        notify_results = await asyncio.gather(*[self._run_event_on_node(self.active_node_cache.get_ref(a_n_key), event_key, event) for a_n_key in waiting_node_keys])
-        dev_log.debug(f"handler id'd <{id(self)}>, event <{id(event)}> end of handle_event results are <{notify_results}>")
+        task = self._create_handle_event_task(event_type=event_key, event=event)
+        await task
 
     def notify_event(self, event_key, event):
-        event_loop = asyncio.get_event_loop()
-        task = event_loop.create_task(self.handle_event(event_key, event))
-        self._event_queue.append(task)
+        return self._create_handle_event_task(event_type=event_key, event=event)
 
     '''#############################################################################################
     ################################################################################################
@@ -419,22 +448,30 @@ class DialogHandler():
 
     async def _run_event_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
         '''processes event happening on the given node'''
-        exec_log.debug(f"handler id'd <{id(self)}> running event <{id(event)}><{event_key}><{type(event)}> on node <{id(active_node)}><{active_node.graph_node.id}>")
-        debugging_phase = " running filters"
+        exec_log.debug(f"handler id'd <{id(self)}> running event <{id(event)}><{event_key}><{type(event)}> on node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}>")
+        if active_node.status == ITEM_STATUS.CLOSED:
+            # node already closed. that is considered done so just return. likely this was because of a scheduled event but during running a previous event closed it. not always error.
+            return RunNodeEventOutput()
+        #TODO: custom exception handling could be expanded depending on use
+        debugging_phase = "event_filters"
         # try: #try catch around whole event running, got tired of it being hard to trace Exceptions so removed
         filter_result = self._run_filters_on_node(active_node, event_key, event)
         if not filter_result:
-            exec_log.info(f"node <{id(active_node)}><{active_node.graph_node.id}> failed filter stage")
-            return
-        dev_log.debug(f"node <{id(active_node)}><{active_node.graph_node.id}> passed filter stage")
+            exec_log.info(f"node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> failed filter stage")
+            return RunNodeEventOutput()
+        dev_log.debug(f"node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> passed filter stage")
 
-        debugging_phase = "running callbacks"
-        callback_close_commands = await self._run_actions_on_node(active_node, event_key, event)
-        dev_log.debug(f"node <{id(active_node)}><{active_node.graph_node.id}> finished event callbacks")
+        try:
+            debugging_phase = "event_actions"
+            callback_close_commands = await self._run_actions_on_node(active_node, event_key, event)
+            dev_log.debug(f"node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> finished event callbacks")
 
-        debugging_phase = "transitions"
-        transition_result = await self._run_transitions_on_node(active_node, event_key, event)
-        dev_log.debug(f"node <{id(active_node)}><{active_node.graph_node.id}> finished transitions")
+            debugging_phase = "event_transitions"
+            transition_result = await self._run_transitions_on_node(active_node, event_key, event)
+            dev_log.debug(f"node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> finished transitions")
+        except Exception as e:
+            exec_log.warning(f"failed to handle event on node at stage {debugging_phase}")
+            return await self._run_event_on_node(active_node=active_node, event_key="node_error", event=ExceptionEvent.SimpleExceptionEvent(event=event, exception=e, section=debugging_phase))
 
         # checking if should close after event, combine event schedule_close flag and what was returned fron transitions
         close_flag = active_node.graph_node.get_event_close_flags(event_key)
@@ -443,18 +480,16 @@ class DialogHandler():
         should_close_session = ("session" in close_flag) or transition_result["close_session"] or callback_close_commands["close_session"]
         if should_close_node and active_node.is_active():
             debugging_phase = "closing"
-            await self.close_node(active_node, timed_out=False)
+            await self.close_node(active_node, timed_out=event_key == "timeout")
 
         if should_close_session and active_node.session is not None:
-            debugging_phase = "closing session"
-            exec_log.debug(f"node <{id(active_node)}><{active_node.graph_node.id}> event handling closing session")
-            await self.close_session(active_node.session)
+            return RunNodeEventOutput(close_session=should_close_session)
         # except Exception as e:
         #     execution_reporting.warning(f"failed to handle event on node at stage {debugging_phase}")
         #     exc_type, exc_obj, exc_tb = sys.exc_info()
         #     fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         #     print(exc_type, fname, exc_tb.tb_lineno)
-        #     dialog_logger.info(f"exception on handling event on node <{id(active_node)}> node details: <{vars(active_node)}> exception:<{e}>")
+        #     dialog_logger.info(f"exception on handling event on node <{self.get_active_node_key(active_node)}> node details: <{vars(active_node)}> exception:<{e}>")
 
     def _run_filters_on_node(self, active_node:BaseType.BaseNode, event_key:str, event, version:typing.Union[str, None] = None):
         '''runs all custom filter callbacks for either starting at node with given event or for the given node and event pair. Filters are all syncronous callbacks.
@@ -464,7 +499,7 @@ class DialogHandler():
         ---
         version - `str`
             "start", or None. specifies which list to run: starting graph at this node filters, or regular for given event'''
-        dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}>, running event filters.  type of event <{type(event)}>")
+        dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}>, running event filters.  type of event <{type(event)}>")
         
         if version == "start":
             dev_log.debug(f"running start version of filters, start filters are {active_node.graph_node.get_graph_start_filters(event_key)}")
@@ -482,8 +517,8 @@ class DialogHandler():
         try:
             return self._filter_list_runner(active_node, event, node_filters, purpose=POSSIBLE_PURPOSES.FILTER)
         except Exception as e:
-            exec_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}>, exception happened when trying to run filters. assuming skip")
-            dev_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}>, exception happened when trying to run filters, details {e}")
+            exec_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}>, exception happened when trying to run filters. assuming skip")
+            dev_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}>, exception happened when trying to run filters, details {e}")
             return False
     
 
@@ -507,36 +542,36 @@ class DialogHandler():
         if version == "start":
             section_name = "setup"
             callbacks = active_node.graph_node.get_graph_start_setup(event_key)
-            exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> running start callbacks: <{callbacks}>")
+            exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> running start callbacks: <{callbacks}>")
         elif version == "close":
             section_name = "close_actions"
             callbacks = active_node.graph_node.get_node_close_actions()
-            exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> running closing callbacks: <{callbacks}>")
+            exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> running closing callbacks: <{callbacks}>")
         else:
             close_flags = active_node.graph_node.get_event_close_flags(event_key)
             control_data = {"close_node": "node" in close_flags, "close_session": "session" in close_flags}
             callbacks = active_node.graph_node.get_event_actions(event_key)
-            exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> running event callbacks: <{callbacks}>")
+            exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> running event callbacks: <{callbacks}>")
         
         old_node_timeout = copy.deepcopy(active_node.timeout) if active_node.timeout is not None else None
         old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session is not None and active_node.session.timeout is not None else None
         before_callbacks_keys = self.active_node_cache.get_all_secondary_keys(id(active_node))
-        try:
-            action_results = await self._action_list_runner(active_node, event, callbacks, POSSIBLE_PURPOSES.ACTION, control_data=control_data, section_name=section_name)
-        except Exception as e:
-            exec_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> exception happened when trying to run callbacks. assuming skip")
-            dev_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> exception happened when trying to run callbacks, details {e}")
-            return control_data
+        # this may error, methods that call this one are responsible for error handling
+        control_data = await self._action_list_runner(active_node, event, callbacks, POSSIBLE_PURPOSES.ACTION, control_data=control_data, section_name=section_name)
+
         # in case there were updates that caused changes to keys, shouldn't break anything if no changes made
-        if id(active_node) in self.active_node_cache:
-            self.active_node_cache.set_item(id(active_node), active_node, before_callbacks_keys)
+        if self.get_active_node_key(active_node) in self.active_node_cache:
+            self.active_node_cache.set_item(self.get_active_node_key(active_node), active_node, before_callbacks_keys)
         if version is None:
+            dev_log.debug(f"action runner is responding to event, could have timeouts being tracked that need updating")
             # only regular event callbacks should check updating timeout trackers
             # start callbacks may change timeout but they haven't been recorded inside tracking yet so that cannot be update call
             self.update_timeout_tracker(active_node, old_node_timeout)
             if active_node.session is not None:
+                dev_log.debug(f"action runner is responding to event, updating session timeout waiter <{self.get_session_key(active_node.session)}>")
                 self.update_timeout_tracker(active_node.session, old_session_timeout)
-        return action_results
+            return control_data
+        return None
     
     def _run_transition_filters_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
         '''runs filters for transitions for the given node and event. Runs filters for each transition in order and returns the first single transition that passes filters
@@ -552,20 +587,20 @@ class DialogHandler():
         node_transitions = active_node.graph_node.get_transitions(event_key)
         passed_transition = None
         for transition_ind, transition in enumerate(node_transitions):
-            dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> starting checking transtion number <{transition_ind}>")
+            dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> starting checking transtion number <{transition_ind}>")
             # first update any counts
             yaml_named_counts = BaseType.BaseGraphNode.parse_node_names(transition["node_names"])
             if "transition_counters" in transition:
                 count_results = self._counter_runner(yaml_named_counts, active_node, event, transition["transition_counters"], POSSIBLE_PURPOSES.TRANSITION_COUNTER)
-                dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> counters finished executing, counts are {count_results}, node ids <{count_results.keys()}>")
+                dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> counters finished executing, counts are {count_results}, node ids <{count_results.keys()}>")
             else:
                 count_results = yaml_named_counts
-                dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> no counters so counts are {count_results}, node ids <{count_results.keys()}>")
+                dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> no counters so counts are {count_results}, node ids <{count_results.keys()}>")
             
             # clean up counts
             for node_name in list(count_results.keys()):
                 if node_name not in self.graph_node_indexer:
-                    exec_log.warning(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> transition to <{node_name}> transition won't work, goal node doesn't exist.")
+                    exec_log.warning(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> transition to <{node_name}> transition won't work, goal node doesn't exist.")
                     del count_results[node_name]
             
             # running filters on this transtition
@@ -573,7 +608,7 @@ class DialogHandler():
             # transition filters will receive the full count in goal_name
             filter_res = True
             if "transition_filters" in transition:
-                exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> has transition filters {transition['transition_filters']}")
+                exec_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> has transition filters {transition['transition_filters']}")
                 try:
                     filter_res = self._filter_list_runner(active_node, event, transition["transition_filters"], POSSIBLE_PURPOSES.TRANSITION_FILTER, goal_node=count_results)
                     if not isinstance(filter_res, bool):
@@ -582,8 +617,8 @@ class DialogHandler():
                 except Exception as e:
                     # if any failure, assume false
                     filter_res = False
-                    exec_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> exception happened when trying to filter transitions. assuming skip")
-                    dev_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> exception happened when trying to filter transitions, details {e}")
+                    exec_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> exception happened when trying to filter transitions. assuming skip")
+                    dev_log.error(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> exception happened when trying to filter transitions, details {e}")
             
             if filter_res:
                 transition_close_flag = []
@@ -603,11 +638,11 @@ class DialogHandler():
     async def _run_transitions_on_node(self, active_node:BaseType.BaseNode, event_key:str, event):
         '''handles transitions for a node (not including closing current one if needed) for the given active node and event.
         Calls to running transition filters to find transition that passes then sets up next nodes and runs actions on all next nodes'''
-        dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> starting handling transitions")
+        dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> starting handling transitions")
         passed_transition = self._run_transition_filters_on_node(active_node, event_key, event)
         if passed_transition is None:
             return {"close_node": False, "close_session": False}
-        dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> transition that passed filters are for nodes <{passed_transition['count']}>, now starting transitions")
+        dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition that passed filters are for nodes <{passed_transition['count']}>, now starting transitions")
         
         session_action = passed_transition["session_action"]
         session_timeout = passed_transition["session_timeout"]
@@ -617,16 +652,16 @@ class DialogHandler():
         # first pass is setting up active nodes and sessions for callbacks to work on
         for next_node_name, count in passed_transition["count"].items():
             for i in range(count):
-                dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> setting up node <{next_node_name}> number <{i}>")
+                dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> setting up node <{next_node_name}> number <{i}>")
                 session = None
                 if session_action == "start" or (session_action == "chain" and active_node.session is None):
                     # start or chaining when no current session
-                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> starting session for transition to goal <{next_node_name}>")
+                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> starting session for transition to goal <{next_node_name}>")
                     if session_timeout is not None:
                         session = SessionData.SessionData(timeout_duration=timedelta(seconds=session_timeout))
                     else:
                         session = SessionData.SessionData()
-                    dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> session debugging, started new session, id is <{id(session)}>, timeout is {session.time_left()}")
+                    dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> session debugging, started new session, id is <{self.get_session_key(session)}>, timeout is {session.time_left()}")
                 elif session_action in ["chain", "section"] and active_node.session is not None:
                     # regular behavior for chain, select session if it exists
                     # only chain and section need to care about session already existing and changing timeout
@@ -634,10 +669,10 @@ class DialogHandler():
                         old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session.timeout is not None else None
                         active_node.session.set_TTL(timeout_duration=timedelta(seconds=session_timeout))
                         self.update_timeout_tracker(active_node.session, old_session_timeout)
-                    dev_log.debug(f"next node starting with current active session. <{id(session)}>")
                     session = active_node.session
+                    dev_log.debug(f"next node starting with current active session. <{self.get_session_key(session)}>")
                 elif session_action != "end":
-                    dev_log.debug(f"next node starting with current active session. <{id(session)}>")
+                    dev_log.debug(f"next node starting with current active session. <{self.get_session_key(session)}>")
                     # end means next node doesn't get current session, all other cases can take current session, though if it was session object it most likely was handled already
                     session = active_node.session
 
@@ -645,12 +680,12 @@ class DialogHandler():
                 if session_action == "section" and session is not None:
                     # not the complete list of all nodes created. might miss sone when ending session, might have extra when starting session but at least covers all that would be in the session about to be sectioned
                     section_exceptions.append(next_node)
-                exec_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> activated next node, <{id(next_node)}><{next_node_name}>, copy <{i}>")
+                exec_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> activated next node, <{id(next_node)}><{next_node_name}>, copy <{i}>")
                 if session_action != "end" and session is not None:
                     # only end doesn't want node added to session
-                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> adding next node <{id(next_node)}><{next_node.graph_node.id}> to session <{id(session)}>")
+                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> adding next node <{id(next_node)}><{next_node.graph_node.id}> to session <{self.get_session_key(session)}>")
                     session.add_node(next_node)
-                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> session debugging, session <{id(session)}>, now has node list is <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
+                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> session debugging, session <{self.get_session_key(session)}>, now has node list is <{[str(self.get_active_node_key(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
                 callbacks_list.append((next_node, passed_transition["actions"], i))
 
         # all setup, do all changes
@@ -658,21 +693,21 @@ class DialogHandler():
             next_node = callback_settings[0]
             action_list = callback_settings[1]
             copy_num = callback_settings[2]
-            dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> executing transition actions for next node <{id(next_node)}><{next_node.graph_node.id}> copy <{copy_num}> list: <{action_list}>")
+            dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> executing transition actions for next node <{self.get_active_node_key(next_node)}><{next_node.graph_node.id}> copy <{copy_num}> list: <{action_list}>")
             control_data = self.generate_action_control_data({"copy":copy_num})
             # session could be chained and thus something that is already registered and timeout could be changed during actions
             # node is always new so no need to grab old timeout
             old_session_timeout = copy.deepcopy(next_node.session.timeout) if next_node.session is not None and next_node.session.timeout is not None else None
-            before_callbacks_keys = self.active_node_cache.get_all_secondary_keys(id(active_node))
+            before_callbacks_keys = self.active_node_cache.get_all_secondary_keys(self.get_active_node_key(active_node))
             await self._action_list_runner(active_node, event, action_list, POSSIBLE_PURPOSES.TRANSITION_ACTION, goal_node=next_node, control_data=control_data, section_name="transition_actions")
-            dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> finished transition actions for next node <{id(next_node)}><{next_node.graph_node.id}> copy <{copy_num}>")
-            self.active_node_cache.set_item(id(active_node), active_node, before_callbacks_keys)
-            if next_node.session is not None and id(next_node.session) in self.timeouts_tracker:
+            dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> finished transition actions for next node <{self.get_active_node_key(next_node)}><{next_node.graph_node.id}> copy <{copy_num}>")
+            self.active_node_cache.set_item(self.get_active_node_key(active_node), active_node, before_callbacks_keys)
+            if next_node.session is not None and len(self.get_active_timeout_tracker(active_node.sesion)) > 0:
                 self.update_timeout_tracker(next_node.session, old_session_timeout)
             await self._track_new_active_node(next_node, event)
         
         if session_action == "section" and active_node.session is not None:
-            dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{id(active_node)}><{active_node.graph_node.id}> sectioning, closing nodes from before transition")
+            dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> sectioning, closing nodes from before transition")
             await self.clear_session_history(active_node.session, exceptions=section_exceptions)
         
         return {"close_node": "node" in  passed_transition["close_flags"], "close_session": "session" in  passed_transition["close_flags"]}
@@ -688,19 +723,18 @@ class DialogHandler():
         '''adds the given active node to handler's internal tracking. after this, node is fully considered being managed by this handler.
         adds node to handler's list of active nodes its currently is waiting on, does node actions for entering node, adds info about what events node
         is waiting for, and adds trackers for timeouts'''
-        #TODO: fine tune id for active nodes
-        dev_log.info(f"handler id'd <{id(self)}> adding node <{id(active_node)}><{active_node.graph_node.id}> to internal tracking and running node callbacks")
+        dev_log.info(f"handler id'd <{id(self)}> adding node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> to internal tracking and running node callbacks")
         active_node.activate()
 
         await self._action_list_runner(active_node, event, active_node.graph_node.get_node_actions(), POSSIBLE_PURPOSES.ACTION, control_data={})
         
         self.create_timeout_tracker(active_node)
         if active_node.session is not None:
-            if id(active_node.session) not in self.timeouts_tracker:
+            if len(self.get_active_timeout_tracker(active_node.session)) == 0:
                 # only tracks session timeout if it is new thing to track, assume outside needs to update if it is already tracked
                 self.create_timeout_tracker(active_node.session)
-        self.active_node_cache.add_item(id(active_node), active_node)
-        dev_log.info(f"handler id'd <{id(self)}> finished adding tracking for node <{id(active_node)}><{active_node.graph_node.id}>")
+        self.active_node_cache.add_item(self.get_active_node_key(active_node), active_node)
+        dev_log.info(f"handler id'd <{id(self)}> finished adding tracking for node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}>")
         
         # used to have autoremoval for nodes that aren't waiting for anything, but found there might be cases where want to keep node around
         # if len(active_node.graph_node.get_events()) < 1:
@@ -719,22 +753,25 @@ class DialogHandler():
             whether or not the close call is because of timing out. this information gets passed to the callbacks
         emergency_remove - `bool`
             whether or not to skip the custom callbacks and go to removing node from tracking'''
-        dev_log.info(f"handler id'd <{id(self)}> node <{id(active_node)}><{active_node.graph_node.id}> starting closing")
+        dev_log.info(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> starting closing")
         if not active_node.is_active():
             return
         active_node.notify_closing()
-        exec_log.info(f"handler id'd <{id(self)}> node <{id(active_node)}><{active_node.graph_node.id}> losing. timed out? <{timed_out}>, emergency? <{emergency_remove}>")
+        exec_log.info(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> losing. timed out? <{timed_out}>, emergency? <{emergency_remove}>")
         if not emergency_remove:
-            await self._run_actions_on_node(active_node, "close", {"timed_out":timed_out}, version="close")
-            dev_log.info(f"handler id'd <{id(self)}> node <{id(active_node)}><{active_node.graph_node.id}> finished custom callbacks closing node, now clearing node from internal trackers")
+            try:
+                await self._run_actions_on_node(active_node, "close", {"timed_out":timed_out}, version="close")
+            except Exception as e:
+                pass
+            dev_log.info(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> finished custom callbacks closing node, now clearing node from internal trackers")
 
         active_node.close()
 
         # this section closes the session if no other nodes in it are active. make sure sectioning session doesn't clear out all nodes
         if active_node.session and active_node.session is not None:
-            exec_log.debug(f"handler id'd <{id(self)}> node <{id(active_node)}><{active_node.graph_node.id}> close_node checking linked session is dead <{id(active_node.session)}>")
+            exec_log.debug(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> close_node checking linked session is dead <{self.get_session_key(active_node.session)}>")
             printing_active = [node.graph_node.id for node in active_node.session.get_linked_nodes()]
-            dev_log.debug(f"linked nodes to check are <{[f'<{str(id(node))}><{node.graph_node.id}> <{node.is_active()}>' for node in active_node.session.get_linked_nodes()]}>")
+            dev_log.debug(f"linked nodes to check are <{[f'<{str(self.get_active_node_key(node))}><{node.graph_node.id}> <{node.is_active()}>' for node in active_node.session.get_linked_nodes()]}>")
             session_void = True
             for node in active_node.session.get_linked_nodes():
                 if node.is_active():
@@ -742,7 +779,7 @@ class DialogHandler():
                     break
             
             if session_void:
-                exec_log.debug(f"handler id'd <{id(self)}> node <{id(active_node)}><{active_node.graph_node.id}> close_node found linked session is dead <{id(active_node.session)}>")
+                exec_log.debug(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> close_node found linked session is dead <{self.get_session_key(active_node.session)}>")
                 await self.close_session(active_node.session, timed_out=timed_out)
 
         printing_active = {x: node.graph_node.id for x, node in self.active_node_cache.cache.items()}
@@ -750,11 +787,8 @@ class DialogHandler():
         # printing_forwarding = {event:[str(x)+' '+self.active_node_cache.get(x)[0].graph_node.id for x in nodes] for event, nodes in self.active_node_cache.items(index_name="event_forwarding")}
         # dialog_logger.debug(f"current state is event forwarding <{printing_forwarding}>")
 
-        self.active_node_cache.remove_item(id(active_node))
-        if id(active_node) in self.timeouts_tracker:
-            if self.timeouts_tracker[id(active_node)].state == TASK_STATE.WAITING:
-                self.timeouts_tracker[id(active_node)].cancel()
-            del self.timeouts_tracker[id(active_node)]
+        self.active_node_cache.remove_item(self.get_active_node_key(active_node))
+        # don't need to worry about timeout. it will find that node is closed and stop
         printing_active = {x: node.graph_node.id for x, node in self.active_node_cache.cache.items()}
         dev_log.debug(f"after remove, state is active nodes are <{printing_active}>")
         # printing_forwarding = {event:[str(x)+' '+self.active_node_cache.get(x)[0].graph_node.id for x in nodes] for event,nodes in self.active_node_cache.items(index_name="event_forwarding")}
@@ -770,15 +804,11 @@ class DialogHandler():
     async def close_session(self, session:SessionData.SessionData, timed_out=False):
         if not session.is_active():
             return
-        exec_log.debug(f"handler id'd <{id(self)}> closing session <{id(session)}>, current nodes <{[str(id(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
+        exec_log.debug(f"handler id'd <{id(self)}> closing session <{self.get_session_key(session)}>, current nodes <{[str(self.get_active_node_key(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
         session.notify_closing()
         await self.clear_session_history(session, timed_out=timed_out)
         session.close()
-        if id(session) in self.timeouts_tracker:
-            task = self.timeouts_tracker[id(session)]
-            if task.state == TASK_STATE.WAITING:
-                task.cancel()
-            del self.timeouts_tracker[id(session)]
+        # don't need to worry about timeout, it will find that session is closed and stop
 
 
     '''#############################################################################################
@@ -803,15 +833,19 @@ class DialogHandler():
         
         Return
         ---
-        dict results from callbacks that would affect system. currently holds `close_node` and `close_session`, both default to False'''
+        `dict` the control data changed by callbacks. currently holds `close_node` and `close_session`, both default to False. cleans up changes due to callbacks'''
+        final_control_data = control_data
+        control_keys = final_control_data.keys()
         if control_data is None:
             # object meant for temp just passing data to rest of functions in this section.
             control_data = self.generate_action_control_data()
-        control_keys = control_data.keys()
+        else:
+            control_data = copy.deepcopy(control_data)
         section_data = {}
         async def recur_list_helper(func_sub_list):
             nonlocal control_data
             nonlocal section_data
+            nonlocal final_control_data
             for callback in func_sub_list:
                 dev_log.debug(f"callback is {callback}, data {section_data}")
                 if isinstance(callback, str):
@@ -830,10 +864,12 @@ class DialogHandler():
                         await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, control_data=control_data, section_name=section_name)
                 cleaned_control_data = {}
                 for key in control_keys:
-                    cleaned_control_data[key] = control_data[key]
+                    if key in control_data:
+                        cleaned_control_data[key] = control_data[key]
+                        final_control_data[key] = control_data[key]
                 control_data = cleaned_control_data
         await recur_list_helper(action_list)
-        return control_data
+        return final_control_data
     
     def _counter_runner(self, yaml_count, active_node:BaseType.BaseNode, event, action_list, purpose:POSSIBLE_PURPOSES):
         section_data = {}
@@ -925,14 +961,14 @@ class DialogHandler():
         Base parameter expected to be what is read in from yaml. Will be deep copied if there is data.
         section and control data are assumed to be managed by caller, which is usually the function section handlers'''
         if not self.function_is_permitted(func_name, purpose):
-            dev_log.debug(f"Dialog handler id'd <{id(self)}> tried running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>, not allowed")
+            dev_log.debug(f"Dialog handler id'd <{id(self)}> tried running function named <{func_name}> for node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>, not allowed")
             if purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
                 # filter functions, whether transtion or not, expect bool returns. must return some bool and assume not allowed
                 # (function not listed in handler, or running for wrong purpose) means failed filter
                 return False
             else:
                 return None
-        dev_log.debug(f"Dialog handler id'd <{id(self)}> starting running function named <{func_name}> for node <{id(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>")
+        dev_log.debug(f"Dialog handler id'd <{id(self)}> starting running function named <{func_name}> for node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> section <{purpose}> event id'd <{id(event)}> type <{type(event)}>")
         func_ref = self.functions_cache.get(func_name)[0]["ref"]
         datapack = CbUtils.CallbackDatapack(
                                             active_node=active_node,
@@ -956,6 +992,215 @@ class DialogHandler():
     def _get_waiting_nodes(self, event_key):
         '''gets list of active nodes waiting for certain event from handler'''
         return self.active_node_cache.get(event_key, index_name="event_forwarding", default=set())
+    
+    def get_active_node_key(self, active_node): #TODO: double check all accessors have been converted to this function
+        '''wrapper for how the system determines for ids of active nodes. Just to make sure it is consistent across the handler'''
+        return id(active_node)
+    
+    def get_session_key(self, session):
+        '''wrapper for how the system determines for ids of sessions. Just to make sure it is consistent across the handler'''
+        return id(session)
+
+    '''#############################################################################################
+    ################################################################################################
+    ####                                       TASK MANGEMENT SECTION
+    ################################################################################################
+    ################################################################################################'''
+    def _filter_active_tasks(self, task_list:'list[HandlerTasks.HandlerTask]'):
+        '''extra cleaning of old tasks that should be removed. main benefit is just makes lists shorter'''
+        filtered_list = []
+        for task in task_list:
+            dev_log.debug(f"checking up on task <{id(task)}>, done? <{task.done()}> exception <{task.exception() if task.done() else 'not done'}>")
+            if task.stop_time is not None and task.stop_time + self.settings.task_age < datetime.utcnow():
+                self.advanced_event_queue.remove_item(id(task))
+                # break any potential circular references. should not happen when using pattern of events in tracking is only previous scheduled tasks
+                task.locking_tasks.clear()
+                continue
+            filtered_list.append(task)
+        return filtered_list
+
+    def _create_handle_event_task(self, event_type, event):
+        dev_log.info(f"handler id'd <{id(self)}> has been notified of event happening. event <{id(event)}><{event_type}> oject type <{type(event)}>, creating task for handling")
+        to_await_event_tasks = []
+        existing_event_tasks:list[HandlerTasks.HandlerTask] = self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])
+        existing_event_tasks = self._filter_active_tasks(existing_event_tasks)
+        if self.settings.strict_event_order:
+            to_await_event_tasks.extend(existing_event_tasks)
+        task = HandlerTasks.HandleEventTask(handler_func=self._handle_event_task, event_type=event_type, event=event, locking_tasks=to_await_event_tasks)
+        dev_log.debug(f"task for <{id(event)}><{event_type}> task is <{id(task)}> waiting on other tasks. locking tasks are <{[id(item) for item in to_await_event_tasks]}>")
+        self.advanced_event_queue.add_item(id(task), task)
+        return task
+    
+    async def _handle_event_task(self, event_type, event, waiting_period_sec):
+        dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_type}> starting handling")
+        waiting_node_keys = self.active_node_cache.get_keys(event_type, index_name="event_forwarding", default=[])
+        dev_log.debug(f"handler id'd <{id(self)}>, event <{id(event)}><{event_type}> nodes waiting for event are <{[f'<{str(self.get_active_node_key(self.active_node_cache.get_ref(x)))}><{self.active_node_cache.get_ref(x).graph_node.id}>' for x in waiting_node_keys]}>")
+        # don't use gather here, think it batches it so all nodes responding to event have to pass callbacks before any one of them go on to transitions
+        # each node is mostly independent of others for each event and don't want them to wait for another node to finish
+        
+        session_tasks = {}
+        '''track sessions that are involved for the nodes we are trying to run on'''
+        node_tasks = []
+        '''tasks for all nodes to run on'''
+
+        # new event needs to be scheduled for all nodes that are waiting for it
+        # either at same time as previous events or after, is a setting
+        # for a event running on node, needs to wait until previous events on session and node are done
+        for node_key in waiting_node_keys:
+            node_locking_tasks = []
+            session_locking_tasks = []
+            node = self.active_node_cache.get_ref(node_key)
+            if node.session is not None:
+                # find if there's any previous events still being processed for the session
+                found_session_tasks = self.advanced_event_queue.get(self.get_session_key(node.session), index_name="session_id", default=[])
+                found_session_tasks = self._filter_active_tasks(found_session_tasks)
+                node_locking_tasks.extend(found_session_tasks)
+                session_locking_tasks.extend(found_session_tasks)
+                found_session_timeouts = self.advanced_event_queue.get(self.get_session_key(node.session), index_name="session_timeouts",default=[])
+                found_session_timeouts = self._filter_active_tasks(found_session_timeouts)
+                node_locking_tasks.extend(found_session_timeouts)
+                session_locking_tasks.extend(found_session_timeouts)
+            # find if any previous events still being processed for the node
+            found_node_tasks = self.advanced_event_queue.get(self.get_active_node_key(node), index_name="node_id", default=[])
+            found_node_tasks = self._filter_active_tasks(found_node_tasks)
+            node_locking_tasks.extend(found_node_tasks)
+            # also wait for timeout events
+            timeout_tasks = self.advanced_event_queue.get(self.get_active_node_key(node), index_name="node_timeouts", default=[])
+            timeout_tasks = self._filter_active_tasks(timeout_tasks)
+            node_locking_tasks.extend(timeout_tasks)
+            node_task = HandlerTasks.HandleNodeEventTask(self._run_event_on_node, active_node=node, event=event, event_type=event_type, locking_tasks=node_locking_tasks, waiting_period_sec=waiting_period_sec)
+            dev_log.debug(f"task created for running event <{id(event)}><{event_type}> on <{self.get_active_node_key(node)}><{node.graph_node.id}>, id <{id(node_task)}> locking are: {[id(task) for task in node_locking_tasks]}")
+            if node.session is not None and self.get_session_key(node.session) not in session_tasks:
+                # there won't be a session for this event yet since still processing and adding to trackers is last step
+                # for list of nodes that are responding to this event, session can repeat. so have a separate list tracking
+                #   unique sessions to create and add for this event
+                session_task = HandlerTasks.HandleSessionEventTask(self.session_event_task, session=node.session, event=event, event_type=event_type, locking_tasks=session_locking_tasks, waiting_period_sec=waiting_period_sec)
+                dev_log.debug(f"task created for running event <{id(event)}><{event_type}> on session <{self.get_session_key(node.session)}>, id <{id(session_task)}> locking are: {[id(task) for task in session_locking_tasks]}")
+                session_tasks[self.get_session_key(node.session)] = session_task
+            node_tasks.append(node_task)
+        # only add the current event tasks to tracking after processing so can't accidentally wait on task from this round
+        for task in node_tasks:
+            self.advanced_event_queue.add_item(id(task), task)
+        for task in session_tasks.values():
+            task.set_node_tasks(node_tasks)
+            self.advanced_event_queue.add_item(id(task), task)
+
+        notify_results = await asyncio.gather(*[*node_tasks, *session_tasks.values()])
+        dev_log.debug(f"handler id'd <{id(self)}>, event <{id(event)}> end of handle_event results are <{notify_results}>")
+
+    async def session_event_task(self, session, event_type, event, node_tasks):
+        dev_log.debug(f"handler id'd <{id(self)}>, handling event <{id(event)}><{event_type}> for session <{self.get_active_node_key(session)}> starting session task, waiting on <{[id(task) for task in node_tasks]}>")
+        await asyncio.gather(*node_tasks)
+        dev_log.debug(f"handler id'd <{id(self)}>, handling event <{id(event)}><{event_type}> for session <{self.get_active_node_key(session)}> finished waiting for node events")
+        close_session = False
+        for node_task in node_tasks:
+            if node_task.done() and node_task.exception() is None:
+                result:RunNodeEventOutput = node_task.result()
+                if result is not None and result.close_session is not None:
+                    close_session = close_session or result.close_session
+        if close_session:
+            dev_log.debug(f"handler id'd <{id(self)}>, handling event <{id(event)}><{event_type}> for session <{self.get_active_node_key(session)}> found needs to close session")
+            await self.close_session(session)
+
+    async def wait_timeout(self, timeoutable, waiting_seconds):
+        task = asyncio.current_task()
+        if issubclass(timeoutable.__class__, BaseType.BaseNode):
+            type = "Node"
+        elif isinstance(timeoutable, SessionData.SessionData):
+            type = "Session"
+        else:
+            return
+        
+        # big outer loop for repeating waiting for timeout, then when it hits run timeout callbacks. just has the regular conditions
+        #   for not needing to check timeouts anymore: doesn't timeout or timeout has passed
+        while timeoutable.timeout is not None and datetime.utcnow() <= timeoutable.timeout:
+            # the keep checking loop
+            while datetime.utcnow() < timeoutable.timeout:
+                task.status = TASK_STATE.WAITING
+                # try to sleep at most the given waiting_seconds just so is somewhat active and can respond to cancels or changes
+                delay = min(max(0, (timeoutable.timeout - datetime.utcnow()).total_seconds()), waiting_seconds)
+                dev_log.debug(f"handler id'd <{id(self)}> waiting for a timeout for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. sleeping for <{delay}>")
+                await asyncio.sleep(delay)
+                if timeoutable.status == ITEM_STATUS.CLOSED or timeoutable.timeout is None:
+                    dev_log.debug(f"handler id'd <{id(self)}> after waiting for a timeout for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. found it is closed or timeout disabled")
+                    # if timeout was stopped or node already closed, don't need to continue checking and running
+                    return
+            task.status = TASK_STATE.EVENT
+            existing_event_tasks = []
+            if not self.settings.timeout_cut and self.settings.strict_event_order:
+                existing_event_tasks:list[HandlerTasks.HandlerTask] = self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])
+                existing_event_tasks = self._filter_active_tasks(existing_event_tasks)
+            timeout_handler_task = HandlerTasks.HandleTimeoutTask(self.handle_timeout, timeoutable=timeoutable, type=type, locking_tasks=existing_event_tasks, waiting_period_sec=waiting_seconds)
+            dev_log.debug(f"handler id'd <{id(self)}> timeout waiter for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. timeout handler task <{id(timeout_handler_task)}> locking tasks found to be <{[id(task) for task in existing_event_tasks]}>")
+            self.advanced_event_queue.add_item(id(timeout_handler_task), timeout_handler_task)
+            dev_log.debug(f"task queue size <{len(self.advanced_event_queue)}>")
+            await timeout_handler_task
+            if timeoutable.status == ITEM_STATUS.CLOSED:
+                return
+
+    async def handle_timeout(self, timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData], waiting_seconds):
+        event = {}
+        if issubclass(timeoutable.__class__, BaseType.BaseNode):
+            type = "Node"
+            session = timeoutable.session
+            nodes = [timeoutable]
+        elif isinstance(timeoutable, SessionData.SessionData):
+            type = "Session"
+            session = timeoutable
+            nodes = [*timeoutable.linked_nodes]
+        dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. started")
+
+        # session may be none because node doesn't have a session.
+        # there is at max one session
+        # nodes are either one or all of the same session
+
+        session_task = None
+        node_tasks = []
+        '''tasks for all nodes to run on'''
+
+        session_locking_tasks = []
+        if session is not None:
+            found_session_tasks = self.advanced_event_queue.get(self.get_session_key(session), index_name="session_id", default=[])
+            found_session_tasks = self._filter_active_tasks(found_session_tasks)
+            session_locking_tasks.extend(found_session_tasks)
+            session_task = HandlerTasks.HandleSessionEventTask(self.session_event_task, session=session, event=event, event_type="timeout", locking_tasks=session_locking_tasks, waiting_period_sec=waiting_seconds)
+            dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. created session task <{id(session_task)}> for session <{self.get_session_key(session)}>, locking tasks are <{[id(task) for task in session_locking_tasks]}>")
+
+        # new event needs to be scheduled for all nodes that are waiting for it
+        # either at same time as previous events or after, is a setting
+        # for a event running on node, needs to wait until previous events on session and node are done
+        for node in nodes:
+            node_locking_tasks = []
+            if session is not None:
+                # find if there's any previous events still being processed for the session
+                node_locking_tasks.extend(found_session_tasks)
+            # find if any previous events still being processed for the node
+            found_node_tasks = self.advanced_event_queue.get(self.get_active_node_key(node), index_name="node_id", default=[])
+            found_node_tasks = self._filter_active_tasks(found_node_tasks)
+            node_locking_tasks.extend(found_node_tasks)
+
+            node_task = HandlerTasks.HandleNodeEventTask(self._run_event_on_node, active_node=node, event=event, event_type="timeout", locking_tasks=node_locking_tasks, waiting_period_sec=waiting_seconds)
+            dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. created node task <{id(node_task)}> for node <{self.get_active_node_key(node)}>, locking tasks are <{[id(task) for task in node_locking_tasks]}>")
+            node_tasks.append(node_task)
+        dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. adding tasks to tracking")
+        # only add the current event tasks to tracking after processing so can't accidentally wait on task from this round
+        final_await_list = []
+        for task in node_tasks:
+            final_await_list.append(task)
+            self.advanced_event_queue.add_item(id(task), task)
+        if session_task:
+            session_task.set_node_tasks(node_tasks)
+            self.advanced_event_queue.add_item(id(session_task), session_task)
+            final_await_list.append(session_task)
+        dev_log.debug(f"task queue size <{len(self.advanced_event_queue)}>")
+        dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. tasks for timeout are <{[id(task) for task in node_tasks]}>")
+        await asyncio.gather(*final_await_list)
+        if timeoutable.timeout is not None and timeoutable.timeout <= datetime.utcnow():
+            dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. found timeout gone, need to close")
+            if type == "Node":
+                await self.close_node(timeoutable)
+            else:
+                await self.close_session(timeoutable)
 
     '''#############################################################################################
     ################################################################################################
@@ -963,110 +1208,79 @@ class DialogHandler():
     ################################################################################################
     ################################################################################################'''
 
-    # TODO: is canceling needed and ok
-    # TODO: runthrough of what happens, is there always one task, how to ensure less double running
-
     # there's only one task that handles organizing how to respond to timeout events
+
+    def get_active_timeout_tracker(self,
+                               timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData]):
+        '''task queue may have finished events hanging around, filter for active timeout trackers'''
+        if timeoutable.timeout is None:
+            # none means no timeout at all. don't need a task.
+            return None
+        fetched_list = []
+        if issubclass(timeoutable.__class__, BaseType.BaseNode):
+            fetched_list = self.advanced_event_queue.get_keys(self.get_active_node_key(timeoutable), index_name="node_waiters", default=[])
+        elif isinstance(timeoutable, SessionData.SessionData):
+            fetched_list = self.advanced_event_queue.get_keys(self.get_session_key(timeoutable), index_name="session_waiters", default=[])
+        filtered_list = []
+        for timeout_waiter_key in fetched_list:
+            timeout_waiter = self.advanced_event_queue.get_ref(timeout_waiter_key)
+            if not timeout_waiter.done():
+                filtered_list.append(timeout_waiter)
+        return filtered_list
 
     def create_timeout_tracker(self,
                                timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData]):
         '''create task object that is responsible for firing tieout event on given node or session.
         Handler will keep track of the task'''
         if timeoutable.timeout is None:
+            # none means no timeout at all. don't need a task.
             return
-        if isinstance(timeoutable, BaseType.BaseNode):
-            timeout_task = TimeoutTask.HandlerTimeoutTask(
-                    timeoutable=timeoutable,
-                    timeout_handler=self.single_node_timeout_handler,
-                    close_handler=self.single_node_timeout_close_handler)
-        else:
-            timeout_task = TimeoutTask.HandlerTimeoutTask(
-                    timeoutable=timeoutable,
-                    timeout_handler=self.single_session_timeout_handler,
-                    close_handler=self.single_session_timeout_close_handler)
-        self.timeouts_tracker[id(timeoutable)] = timeout_task
+        if len(self.get_active_timeout_tracker(timeoutable)) > 0:
+            # there's already a tracker recorded
+            return
+        if issubclass(timeoutable.__class__, BaseType.BaseNode):
+            task = HandlerTasks.HandleTimeoutWaiter(self.wait_timeout, timeoutable, waiting_period_sec=4)
+            dev_log.debug(f"handler id'd <{id(self)}> creating timeout task <{id(task)}> for node <{self.get_active_node_key(timeoutable)}><{timeoutable.graph_node.id}>, handling happens in <{timeoutable.time_left()}>")
+            self.advanced_event_queue.add_item(id(task), task)
+        elif isinstance(timeoutable, SessionData.SessionData):
+            task = HandlerTasks.HandleTimeoutWaiter(self.wait_timeout, timeoutable, waiting_period_sec=4)
+            dev_log.debug(f"handler id'd <{id(self)}> creating timeout task <{id(task)}> for session <{self.get_session_key(timeoutable)}>, handling happens in <{timeoutable.time_left()}>")
+            self.advanced_event_queue.add_item(id(task), task)
 
     def update_timeout_tracker(self,
                                timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData],
                                old_timeout):
         '''updates internal tracking if there are changes to timeout that would cause significant difference.
         timeout shortened, creates new task if existing was sleeping. timeout removed, removes tracking'''
+        if issubclass(timeoutable.__class__, BaseType.BaseNode):
+            timeoutable_id = self.get_active_node_key(timeoutable)
+            type = "Node"
+        else:
+            timeoutable_id = self.get_session_key(timeoutable)
+            type = "Session"
+            dev_log.debug(f"updating timeout tracker for a session. think id is <{timeoutable_id}>, new timeout {timeoutable.timeout} odl timeout is {old_timeout}")
+            dev_log.debug(f"current status is <{[id(self.advanced_event_queue.get_ref(task_key).timeoutable) for task_key in self.advanced_event_queue.get_keys('TimeoutWaiter', index_name='task_type')]}>")
         if timeoutable.timeout is not None:
             # there is a timeout on item
             if old_timeout is None:
                 # newly created timeout, so need to add tracker
                 self.create_timeout_tracker(timeoutable)
-            elif id(timeoutable) not in self.timeouts_tracker:
-                    # error case, if there's an old timeout there should be something in trackers.
-                    #  but not terrible if it isn't there
-                    self.create_timeout_tracker(timeoutable)
-            elif timeoutable.timeout < old_timeout:
-                # there is old timeout, only case we need to deal with is shortened timeout
-                existing_task = self.timeouts_tracker[id(timeoutable)]
-                if existing_task.state == TASK_STATE.WAITING:
-                    # only when waiting might wake up really late so cancel and recreate
-                    # don't want to disturb if in middle of event handling, plus there's no changes if
-                    #   timeout was updated to before old and already handling
-                    existing_task.cancel()
-                    self.create_timeout_tracker(timeoutable)
-        else:
-            # no timeout on node
-            if old_timeout is not None:
-                # used to have a timeout, if it was tracked that is not needed anymore
-                if id(timeoutable) in self.timeouts_tracker:
-                    existing_task = self.timeouts_tracker[id(timeoutable)]
-                    if existing_task.state == TASK_STATE.WAITING:
-                        # only when waiting might wake up really late so cancel and recreate
-                        # don't want to disturb if in middle of event handling
-                        existing_task.cancel()
-                    del self.timeouts_tracker[id(timeoutable)]
-
-    async def single_node_timeout_handler(self, node:BaseType.BaseNode):
-        if id(node) in self.active_node_cache:
-            if node.is_active():
-                await self._run_event_on_node(node, "timeout", {})
-
-    async def single_node_timeout_close_handler(self, node:BaseType.BaseNode):
-        try:
-            cleaning_logger.debug(f"starting to clear out node {id(node)} {node.graph_node.id}")
-            await self.close_node(node, timed_out=True)
-            exec_log.warning(f"cleaning close node finished awaiting closing {id(node)}, sanity check is it stil inside {id(node) in self.active_node_cache}")
-        except Exception as e:
-            exec_log.warning(f"close node failed on node {id(node)}, details: {type(e)}, {e}")
-            self.close_node(node, timed_out=True, emergency_remove=True)
-        if id(node) in self.timeouts_tracker:
-            del self.timeouts_tracker[id(node)]
+            elif len(self.get_active_timeout_tracker(timeoutable)) == 0:
+                # error case, if there's an old timeout there should be something in trackers.
+                #  but not terrible if it isn't there
+                self.create_timeout_tracker(timeoutable)
+                #v3.8 transitioned to tasks. removing the part about checking if changed to shorter timeout and recreating task
+                # since it's a little bit much to juggle the timeout task checking if it is the "main" task allowed to run the
+                # timeout event stuff. This means the timeout tasks will have to wake up by itself to check if things changed and
+                # timeout handling is limited to that speed. might be some slowness when updating to shorter timeout
         
-    async def single_session_timeout_handler(self, session:SessionData.SessionData):
-        gatherables = []
-        if not session.is_active():
-            return
-        for node in session.linked_nodes:
-            if node.is_active():
-                gatherables.append(self._run_event_on_node(node, "timeout", {}))
-        await asyncio.gather(*gatherables)
-
-    async def single_session_timeout_close_handler(self, session:SessionData.SessionData):
-        await self.close_session(session, timed_out=True)
-        if id(session) in self.timeouts_tracker:
-            del self.timeouts_tracker[id(session)]
-
     async def clean_task(self, task_period:float):
         this_cleaning = asyncio.current_task()
         cleaning_logger.info(f"clean task id <{id(this_cleaning)}><{this_cleaning}> starting, period is <{task_period}>")
         # want forever running task while handler is alive
         while True:
-            i = 0
-            while i < len(self._event_queue):
-                task = self._event_queue[i]
-                if task.done():
-                    if not task.cancelled() and task.exception() is not None:
-                        print(task.exception())
-                    self._event_queue.pop(i)
-                    i -= 1
-                if i % 10 == 0:
-                    await asyncio.sleep(0)
-                i += 1
+            tasks_list = list(self.advanced_event_queue.cache.values())
+            self._filter_active_tasks(tasks_list)
             await asyncio.sleep(task_period)
 
     def start_cleaning(self, event_loop:asyncio.AbstractEventLoop=None):

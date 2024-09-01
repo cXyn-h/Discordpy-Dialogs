@@ -70,6 +70,13 @@ def merge_overrides(base, override):
         result = override
     return result
 
+def grab_data(datapack, location, default=None):
+    grab_location = select_from_pack(location, datapack)
+    if grab_location is None:
+        return default
+    split_grab = location.split(".")
+    return DotNotator.parse_dot_notation(split_grab[1:], grab_location, default)
+
 @cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional", schema={"type":"object", "properties":{
     "grab_location": {
         "type": "string",
