@@ -1,5 +1,4 @@
 #TODO: is adding values onto fields such as event filters feasible?
-#TODO: proofing against None values: what is values if you just list events flag and leave value blank, getters proofed against None, handler accesses these directly without getters so which ones might crash because of None
 #TODO: double check if inherited from parent class's set and update methods should be used (probably, but further down pipeline problem)
 from datetime import datetime, timedelta
 import typing
@@ -11,6 +10,7 @@ from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 import src.utils.Cache as Cache
 import src.utils.ValidationUtils as ValidationUtils
 import src.utils.DotNotator as DotNotator
+import src.utils.SectionUtils as SectionUtils
 
 class BaseGraphNode:
     VERSION = "3.8.0"
@@ -171,8 +171,6 @@ required: ["id"]
     TYPE="Base"
 
     def get_validation_info(self):
-        #TODO: feels clunkly. reevaluate what does need to be validated here (probably at least a way to check if functions needed and nodes to go to are actually in handler)
-        #  (what about the rest of node definition? think it should have been validated on edits)
         unique_next_nodes = set()
         function_set_list = []
         if self.graph_start is not None:
@@ -242,16 +240,8 @@ required: ["id"]
     @classmethod
     def normalize_input(cls, data, insert_defaults=True):
         '''takes already validated data and gets it ready for making a node with. this formats data to be consistent and inserts any default values
-        if they are missing at top level if parameter flag is true. Any default values for nested structures are added as needed
+        if they are missing at top level if insert_defaults parameter is true. Any default values for nested structures are added as needed
         regardless of flag'''
-
-        def format_callback_list(func_list):
-            '''helper for the subsections that are lists of function names and settings. format to always be a dict with function
-            name as key and any value present is the parameter (yaml will always provide the defaults for paramters)'''
-            for index in range(len(func_list)):
-                action = func_list[index]
-                if isinstance(action, str):
-                    func_list[index] = {action: None}
 
         # get default values for top level of config
         # nested sections also have default values and formatting, not reflected in this
@@ -266,11 +256,11 @@ required: ["id"]
             # pad actions with default empty indicator from base ones. reduce later checks by removing the "is key there check"
             data["actions"] = base_fields["actions"]["default"]
         else:
-            format_callback_list(data.get("actions", []))
+            SectionUtils.formatSection(data.get("actions", []), POSSIBLE_PURPOSES.ACTION)
         if "close_actions" not in data and insert_defaults:
             data["close_actions"] = base_fields["close_actions"]["default"]
         else:
-            format_callback_list(data.get("close_actions", []))
+            SectionUtils.formatSection(data.get("close_actions", []), POSSIBLE_PURPOSES.ACTION)
         if "TTL" not in data and insert_defaults:
             data["TTL"] = base_fields["TTL"]["default"]
         if "graph_start" not in data:
@@ -286,11 +276,13 @@ required: ["id"]
                     continue
                 if isinstance(event_data.get("session_chaining"), str):
                     event_data["session_chaining"] = {event_data["session_chaining"]: SessionData.SessionData.DEFAULT_TTL}
-                for action_list in ["filters", "setup"]:
+                for settings in [(POSSIBLE_PURPOSES.FILTER, "filters"), (POSSIBLE_PURPOSES.ACTION, "setup")]:
+                    purpose = settings[0]
+                    action_list = settings[1]
                     if action_list not in event_data:
                         event_data[action_list] = []
                     else:
-                        format_callback_list(event_data.get(action_list, []))
+                        SectionUtils.formatSection(event_data.get(action_list, []), purpose)
         if "events" not in data:
             if insert_defaults:
                 data["events"] = base_fields["events"]["default"]
@@ -302,11 +294,13 @@ required: ["id"]
                     continue
                 if "schedule_close" in event_data and isinstance(event_data["schedule_close"], str):
                         event_data["schedule_close"] = [event_data["schedule_close"]]
-                for action_list in ["filters", "actions"]:
+                for settings in [(POSSIBLE_PURPOSES.FILTER, "filters"), (POSSIBLE_PURPOSES.ACTION, "actions")]:
+                    purpose = settings[0]
+                    action_list = settings[1]
                     if action_list not in event_data:
                         event_data[action_list] = []
                     else:
-                        format_callback_list(event_data.get(action_list, []))
+                        SectionUtils.formatSection(event_data.get(action_list, []), purpose)
                 if "transitions" not in event_data:
                     event_data["transitions"] = []
                     # since last checked item in the event, can continue since the rest is just formatting if transitions is in event
@@ -323,11 +317,15 @@ required: ["id"]
                                 result[node_settings] = 1
                             else:
                                 result.update(node_settings)
-                    for action_list in ["transition_counters", "transition_filters", "transition_actions"]:
+                    for settings in [(POSSIBLE_PURPOSES.TRANSITION_COUNTER, "transition_counters"),
+                                     (POSSIBLE_PURPOSES.TRANSITION_FILTER, "transition_filters"),
+                                     (POSSIBLE_PURPOSES.TRANSITION_ACTION, "transition_actions")]:
+                        purpose = settings[0]
+                        action_list = settings[1]
                         if action_list not in transition:
                             transition[action_list] = []
                         else:
-                            format_callback_list(transition.get(action_list, []))
+                            SectionUtils.formatSection(transition.get(action_list, []), purpose)
                     if "schedule_close" in transition and isinstance(transition["schedule_close"], str):
                         transition["schedule_close"] = [transition["schedule_close"]]
                     if isinstance(transition.get("session_chaining"), str):
@@ -382,7 +380,7 @@ required: ["id"]
         return None
 
     def get_graph_start_setup(self, event_type:str):
-        '''grabs the list of function names needed for setup phase of starting graph at this node for the given event_type.
+        '''returns a copy of the list of function names needed for setup phase of starting graph at this node for the given event_type.
 
         Returns
         ---
@@ -395,7 +393,7 @@ required: ["id"]
             return []
 
     def get_graph_start_filters(self, event_type:str):
-        '''grabs the list of function names needed for filtering if graph can start at this node for the given event_type.
+        '''returns a copy of the list of function names needed for filtering if graph can start at this node for the given event_type.
 
         Returns
         ---
@@ -717,6 +715,26 @@ required: ["id"]
         '''custom override function for dot parser for the purpose of chainging how Graph Node is indexed. 
         Changes how functions are indexed by. Data structure has them split into different storage areas
         but want to index by each unique function'''
+        def grab_from_subsection(subsection):
+            result_function_names = set()
+            for action in subsection:
+                if isinstance(action, dict):
+                    for func_name in action.keys():
+                        # probably would only have one key which is function name in each action
+                        result_function_names.add(func_name)
+                elif issubclass(action.__class__, SectionUtils.SubSection):
+                    if isinstance(action, SectionUtils.IfSubSection):
+                        sub_section_results = grab_from_subsection(action.filters)
+                        for name in sub_section_results: result_function_names.add(name)
+                        sub_section_results = grab_from_subsection(action.actions)
+                        for name in sub_section_results: result_function_names.add(name)
+                    else:
+                        sub_section_results = grab_from_subsection(action.callbacks)
+                        for name in sub_section_results: result_function_names.add(name)
+                else:
+                    result_function_names.add(action)
+            return result_function_names
+
         result_keys = set()
         if keys[0] == "functions":
             # when specifying index by functions do it for all functions used, aka all sections of functions
@@ -745,13 +763,8 @@ required: ["id"]
                             action_lists.append(transition_settings["transition_actions"])
             # after gathering all functions, parse for function name
             for action_list in action_lists:
-                for action in action_list:
-                    if isinstance(action, dict):
-                        for func_name in action.keys():
-                            # probably would only have one key which is function name in each action
-                            result_keys.add(func_name)
-                    else:
-                        result_keys.add(action)
+                sub_section_results = grab_from_subsection(action_list)
+                for name in sub_section_results: result_keys.add(name)
             return keys[1:], list(result_keys)
         # design for 3.8.0 onwards allows run-time changing next_nodes with transition_counters.
         # disabling this section because it only will be able to see what is recorded in yaml which might be 

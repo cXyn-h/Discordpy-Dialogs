@@ -14,6 +14,8 @@ import typing
 import copy
 # validating function data
 from jsonschema import validate, ValidationError
+# exception catch with stack trace
+import traceback
 
 import src.DialogNodeParsing as nodeParser
 import src.DialogNodes.BaseType as BaseType
@@ -28,6 +30,7 @@ import src.utils.ValidationUtils as ValidationUtils
 import src.utils.Cache as Cache
 import src.utils.HandlerTasks as HandlerTasks
 import src.utils.TimeString as TimeString
+import src.utils.SectionUtils as SectionUtils
 
 
 dev_log = logging.getLogger('Dev-Handler-Reporting')
@@ -203,24 +206,17 @@ class DialogHandler():
                 if type(callback) is str:
                     func_name = callback
                     args = None
+                elif issubclass(callback.__class__, SectionUtils.SubSection):
+                    if isinstance(callback, SectionUtils.IfSubSection):
+                        validate_function_list(ValidationUtils.FunctionSectionInfo(callback.filters, node_id, POSSIBLE_PURPOSES.FILTER, string_rep+" filters for if statement", event_type=event_type))
+                        validate_function_list(ValidationUtils.FunctionSectionInfo(callback.actions, node_id, purpose, string_rep+" actions for if statement", event_type=event_type))
+                    elif issubclass(callback.__class__, SectionUtils.LogicOpSubSection):
+                        validate_function_list(ValidationUtils.FunctionSectionInfo(callback.callbacks, node_id, purpose, string_rep, event_type=event_type))
+                    continue
                 else:
                     func_name = list(callback.keys())[0]
                     args = callback[func_name]
                 
-                #TODO: check event type and node type once that's implemented
-                if func_name == "or" or func_name == "and" and purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
-                    validate_function_list(ValidationUtils.FunctionSectionInfo(args, node_id, purpose, string_rep, event_type=event_type))
-                    continue
-                    
-                if func_name == "not" and purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER]:
-                    validate_function_list(ValidationUtils.FunctionSectionInfo(args, node_id, purpose, string_rep, event_type=event_type))
-                    continue
-
-                if func_name == "if" and purpose in [POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION]:
-                    validate_function_list(ValidationUtils.FunctionSectionInfo(args["filters"], node_id, POSSIBLE_PURPOSES.FILTER, string_rep+" filters for if statement", event_type=event_type))
-                    validate_function_list(ValidationUtils.FunctionSectionInfo(args["actions"], node_id, purpose, string_rep+" actions for if statement", event_type=event_type))
-                    continue
-
                 if not self.function_is_permitted(func_name, purpose):
                     raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep} but isn't allowed to run there")
                 # function has to exist at this point because the check checks for that
@@ -470,7 +466,8 @@ class DialogHandler():
             transition_result = await self._run_transitions_on_node(active_node, event_key, event)
             dev_log.debug(f"node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> finished transitions")
         except Exception as e:
-            exec_log.warning(f"failed to handle event on node at stage {debugging_phase}")
+            exec_log.warning(f"failed to handle event <{event_key}> <{id(event)}> on node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> at stage {debugging_phase}")
+            print(traceback.format_exc())
             return await self._run_event_on_node(active_node=active_node, event_key="node_error", event=ExceptionEvent.SimpleExceptionEvent(event=event, exception=e, section=debugging_phase))
 
         # checking if should close after event, combine event schedule_close flag and what was returned fron transitions
@@ -851,17 +848,14 @@ class DialogHandler():
                 if isinstance(callback, str):
                     # is just function name, no parameters
                     await self._run_func_async(callback, purpose, active_node, event, goal_node=goal_node, callb_section_data=section_data, control_data=control_data, section_name=section_name)
+                elif isinstance(callback, SectionUtils.IfSubSection):
+                    filter_res = self._filter_list_runner(active_node=active_node, event=event, filter_list=callback.filters, purpose=POSSIBLE_PURPOSES.FILTER, section_data=section_data)
+                    if filter_res:
+                        await recur_list_helper(callback.actions)
                 else:
                     key = list(callback.keys())[0]
                     value = callback[key]
-                    if key in ["if"]:
-                        filter_list = value["filters"]
-                        filter_res = self._filter_list_runner(active_node=active_node, event=event, filter_list=filter_list, purpose=POSSIBLE_PURPOSES.FILTER, section_data=section_data)
-                        if filter_res:
-                            sub_actions = value["actions"]
-                            await recur_list_helper(sub_actions)
-                    else:
-                        await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, control_data=control_data, section_name=section_name)
+                    await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, control_data=control_data, section_name=section_name)
                 cleaned_control_data = {}
                 for key in control_keys:
                     if key in control_data:
@@ -915,21 +909,20 @@ class DialogHandler():
                     filter_run_result = self._run_func(func_name=filter, purpose=purpose, active_node=active_node, event=event, goal_node=goal_node, callb_section_data=section_data, section_name=section_name)
                     if not isinstance(filter_run_result, bool):
                         filter_run_result = False
+                elif isinstance(filter, SectionUtils.LogicOpSubSection):
+                    if filter.name == "not":
+                        filter_run_result = not recur_list_helper(filter.callbacks, operator="and")
+                    else:
+                        filter_run_result = recur_list_helper(filter.callbacks, operator=filter.name)
                 else:
                     # is a dict representing function call with arguments or nested operator, should only have one key:value pair
                     key = list(filter.keys())[0]
                     value = filter[key]
-                    if key in ["and", "or"]:
-                        # special keywords that aren't function names and special meaning to handler
-                        # filter_run_result = self._filter_list_runner(active_node, event, value, purpose, goal_node, operator=key, section_data=section_data)
-                        filter_run_result = recur_list_helper(value, operator=key)
-                    elif key == "not":
-                        filter_run_result = not recur_list_helper(value, operator="and")
-                    else:
-                        # argument in vlaue is expected to be one object. a list, a dict, a string etc
-                        filter_run_result = self._run_func(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, section_name=section_name)
-                        if not isinstance(filter_run_result, bool):
-                            filter_run_result = False
+
+                    # argument in vlaue is expected to be one object. a list, a dict, a string etc
+                    filter_run_result = self._run_func(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, section_name=section_name)
+                    if not isinstance(filter_run_result, bool):
+                        filter_run_result = False
                 # find if hit early break because not possible to change result with rest of list
                 if operator == "and" and not filter_run_result:
                     return False
