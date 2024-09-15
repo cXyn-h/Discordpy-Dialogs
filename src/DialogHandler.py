@@ -702,7 +702,7 @@ class DialogHandler():
             await self._action_list_runner(active_node, event, action_list, POSSIBLE_PURPOSES.TRANSITION_ACTION, goal_node=next_node, control_data=control_data, section_name="transition_actions")
             dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> finished transition actions for next node <{self.get_active_node_key(next_node)}><{next_node.graph_node.id}> copy <{copy_num}>")
             self.active_node_cache.set_item(self.get_active_node_key(active_node), active_node, before_callbacks_keys)
-            if next_node.session is not None and len(self.get_active_timeout_tracker(active_node.sesion)) > 0:
+            if next_node.session is not None and len(self.get_active_timeout_tracker(next_node.session)) > 0:
                 self.update_timeout_tracker(next_node.session, old_session_timeout)
             await self._track_new_active_node(next_node, event)
         
@@ -1215,7 +1215,7 @@ class DialogHandler():
         '''task queue may have finished events hanging around, filter for active timeout trackers'''
         if timeoutable.timeout is None:
             # none means no timeout at all. don't need a task.
-            return None
+            return []
         fetched_list = []
         if issubclass(timeoutable.__class__, BaseType.BaseNode):
             fetched_list = self.advanced_event_queue.get_keys(self.get_active_node_key(timeoutable), index_name="node_waiters", default=[])
