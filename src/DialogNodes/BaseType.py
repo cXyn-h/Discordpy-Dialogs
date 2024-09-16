@@ -538,14 +538,12 @@ required: ["id"]
 
         # nothing cached, need to actually find definitions for this class
         # grab inherited fields first
-        #TODO: maybe re-write with bases instead of mro?
-        mro_list = cls.__mro__
+        parent_classes = cls.__bases__
         final_definitions = {}
-        # hoping any non-node classes in this mro list will not have get_node_fields function (not checking isinstance so duck typing can work)
-        if len(mro_list) > 1:
-            # if longer than one means there's inheritance and need to gather all fields inherited from nodes
-            # zero-th element is self, don't need to handle that here
-            for parent in reversed(mro_list[1:]):
+        # assumes anything system will use as nodes have to be of BaseGraphNode. aka no duck typing
+        if len(parent_classes) > 0:
+            # need to gather all schema details inherited from nodes
+            for parent in reversed(parent_classes):
                 parent_definitions = parent.get_node_fields() if hasattr(parent, "get_node_fields") else {}
                 # convert the returned list into a dict that's being used for easy finding
                 for single_field in parent_definitions:
@@ -565,10 +563,7 @@ required: ["id"]
         for single_field in self_modifications["options"]:
             if "name" not in single_field:
                 raise Exception(f"node type <{cls.TYPE}> has malformed option: An option in definition is missing a name")
-            if single_field["name"] in final_definitions:
-                final_definitions.update({single_field["name"]: single_field})
-            else:
-                final_definitions[single_field["name"]] = single_field
+            final_definitions[single_field["name"]] = single_field
 
         cls.CLASS_FIELDS = (datetime.utcnow(), list(final_definitions.values()))
         return list(final_definitions.values())
@@ -580,14 +575,12 @@ required: ["id"]
             # if there's a previous result of parsed schema cached, use that
             return copy.deepcopy(cls.PARSED_SCHEMA[1])
 
-        mro_list = cls.__mro__
-        #TODO: this technically works for multi inheritance, but easily multiplies the length. maybe do something to find and merge duplicates later
+        parent_classes = cls.__bases__
         final_schema = {"allOf": []}
-        # hoping any non-node classes in this mro list will not have get_node_schema function (not checking isinstance so duck typing can work)
-        if len(mro_list) > 1:
-            # if longer than one means there's inheritance and need to gather all schema details inherited from nodes
-            # for loop takes off the zero-th element cause that is self
-            for parent in reversed(mro_list[1:]):
+        # assumes anything system will use as nodes have to be of BaseGraphNode. aka no duck typing
+        if len(parent_classes) > 0:
+            # need to gather all schema details inherited from nodes
+            for parent in reversed(parent_classes):
                 parent_definitions = parent.get_node_schema() if hasattr(parent, "get_node_schema") else {"allOf": []}
                 for schema_fragment in parent_definitions["allOf"]:
                     final_schema["allOf"].append(schema_fragment)
