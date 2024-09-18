@@ -1,5 +1,5 @@
 import pytest
-import src.utils.Cache_old as Cache_old
+import Tests.Test_Old_cache.Cache_old as Cache_old
 
 def test_reindex():
     '''test reindex updates indices when setting a value'''

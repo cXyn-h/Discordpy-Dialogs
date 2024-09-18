@@ -1,7 +1,7 @@
 import pytest
-import src.utils.Cache_old as Cache_old
+import Tests.Test_Old_cache.Cache_old as Cache_old
 import src.DialogNodes.BaseType as BaseType
-from src.DialogNodes.CacheNodeIndex import CacheNodeIndex
+from Tests.Test_Old_cache.CacheNodeIndex import CacheNodeIndex
 import src.DialogNodeParsing as NodeParser
 import yaml
 

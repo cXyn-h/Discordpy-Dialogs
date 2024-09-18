@@ -1,5 +1,5 @@
 import pytest
-import src.utils.Cache_old as Cache_old
+import Tests.Test_Old_cache.Cache_old as Cache_old
 
 def test_primary_key_set():
     '''test set updates data and indices upon first and second set on same primary key'''

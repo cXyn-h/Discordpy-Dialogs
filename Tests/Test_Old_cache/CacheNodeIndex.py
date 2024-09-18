@@ -1,4 +1,4 @@
-from src.utils.Cache_old import AbstractIndex, AbstractCacheEntry
+from Tests.Test_Old_cache.Cache_old import AbstractIndex, AbstractCacheEntry
 import src.DialogNodes.BaseType as BaseType
 import typing
 
