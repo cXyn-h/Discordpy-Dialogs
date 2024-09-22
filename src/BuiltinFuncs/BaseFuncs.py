@@ -1,11 +1,12 @@
 import src.utils.CallbackUtils as cbUtils
 import src.utils.DotNotator as DotNotator
 import src.DialogNodes.BaseType as BaseType
+from src.utils.Enums import POSSIBLE_PURPOSES
 import random
 import inspect
 from datetime import datetime, timedelta
-from src.utils.Enums import POSSIBLE_PURPOSES
 from enum import Enum
+from jsonschema import validate, ValidationError
 
 class YAML_SELECTION(Enum):
     EVENT="event"
@@ -60,24 +61,41 @@ def handle_save_data(save_data, save_locations, datapack):
         elif isinstance(location, dict):
             location[field_name] = save_data
 
-def merge_overrides(base, override):
+def default_runtime_input_finder(runtime_input_key, data:cbUtils.CallbackDatapack):
+    section_overrides = data.section_data.get(runtime_input_key, None)
+    if runtime_input_key in data.section_data:
+        del data.section_data[runtime_input_key]
+    return section_overrides
+
+def default_merge_settings(base, override):
+    '''default strategy of merging parameter settings for callbacks. If paramter is dictionary, then if override is a dict, updates base with override
+    (if it is a nested dictionary, will only call update with top level keys, nested objects are replaced); 
+    if list, then if override is also a list, appends all elements; otherwise only sets value if override is not None'''
     result = base
     if isinstance(base, dict):
-        result.update(override)
+        if isinstance(override, dict):
+            result.update(override)
     elif isinstance(base, list):
-        result.extend(override)
-    else:
+        if isinstance(override, list):
+            result.extend(override)
+    elif override is not None:
         result = override
     return result
 
+def default_handle_run_input(runtime_input_key, data:cbUtils.CallbackDatapack, merge_handler=default_merge_settings):
+    '''default way of accepting runtime input. searches for input in section_data only and removes data from section_data after use. Uses passed function to merge two sets of settings'''
+    section_overrides = default_runtime_input_finder(runtime_input_key, data)
+    return merge_handler(data.base_parameter, section_overrides)
+
 def grab_data(datapack, location, default=None):
+    '''use dot separate location name and grab whatever is stored there or return default if not found'''
     grab_location = select_from_pack(location, datapack)
     if grab_location is None:
         return default
     split_grab = location.split(".")
     return DotNotator.parse_dot_notation(split_grab[1:], grab_location, default)
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="optional", schema={"type":"object", "properties":{
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="transfer_data_override", schema={"type":"object", "properties":{
     "grab_location": {
         "type": "string",
         "description": "what to grab from event",
@@ -94,13 +112,9 @@ def grab_data(datapack, location, default=None):
     "delete_after": {
         "type": "boolean"
     }
-}})
+}}, description_blurb="moves data between storage(s) and workspace areas")
 def transfer_data(data:cbUtils.CallbackDatapack):
-    func_override_key = "transfer_data_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    section_parameter = default_handle_run_input("transfer_data_override", data)
     grab_location_name = section_parameter["grab_location"]
     save_locations = section_parameter["save_locations"]
 
@@ -122,7 +136,7 @@ def transfer_data(data:cbUtils.CallbackDatapack):
         elif isinstance(grab_location, dict):
             del grab_location[split_grab[-1]]
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="save_data_override", schema={
 "type": "object", "properties": {
     "value": {},
     "save_locations": {
@@ -133,13 +147,9 @@ def transfer_data(data:cbUtils.CallbackDatapack):
             "pattern": REGEX_OR_OUTPUT_SOURCES+"(\.[\w\d]*)+"
         }
     }
-}})
+}}, description_blurb="puts value in storage location(s)")
 def save_data(data:cbUtils.CallbackDatapack):
-    func_override_key = "save_data_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    section_parameter = default_handle_run_input("save_data_override", data)
     save_locations = section_parameter["save_locations"]
     saved_value = section_parameter["value"]
 
@@ -148,7 +158,7 @@ def save_data(data:cbUtils.CallbackDatapack):
     
     handle_save_data(saved_value, save_locations, data)
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="increment_value_override", schema={
 "type":"object", "properties":{
     "location": {
         "type": "string",
@@ -156,13 +166,10 @@ def save_data(data:cbUtils.CallbackDatapack):
         "pattern": REGEX_OR_OUTPUT_SOURCES+"(\.[\w\d]*)+"
     },
     "increment": {"type": "number"},
-}})
+}},
+description_blurb="adds on increment to number saved in given location")
 def increment_value(data:cbUtils.CallbackDatapack):
-    func_override_key = "increment_value_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    section_parameter = default_handle_run_input("increment_value_override", data)
     location = section_parameter["location"]
     increment = section_parameter["increment"]
     split_names = location.split(".")
@@ -178,33 +185,25 @@ def increment_value(data:cbUtils.CallbackDatapack):
     elif isinstance(location, dict):
         location[field_name] = location[field_name] + increment
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], has_parameter="always", schema={"type":"number"})
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="random_chance_override", schema={"type":"number", "maximum": 1, "minimun": 0},
+                           description_blurb="RNG with customizable chance (as a decimal number)")
 def random_chance(data:cbUtils.CallbackDatapack):
-    func_override_key = "random_chance_override"
-    section_overrides = data.section_data.get(func_override_key, None)
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    bar = data.base_parameter if data.base_parameter is not None else (section_overrides if section_overrides is not None else 1)
+    bar = default_handle_run_input("random_chance_override", data)
+    if bar is None:
+        bar = 1
 
     num = random.random()
     return num < bar
 
 #TODO: do nested support
     # "variable": {"type":"string", "pattern": "^(current_session|goal_session|current_node|goal_node|node|session)(\.[\w]+)+$"},
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], has_parameter="always", schema={"type":"object", "properties":{
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="simple_compare_override", schema={"type":"object", "properties":{
     "variable": {"type":"string", "pattern": REGEX_OR_OUTPUT_SOURCES+"(\.[\w\d]*)+"},
     "operator": {"type": "string", "enum":["==", "<", ">", "<=", ">=", "!="]},
     "value": {"type": "integer"}
-}, "required": ["operator", "variable", "value"]})
+}, "required": ["operator", "variable", "value"]}, description_blurb="string for comparing variable, to single value")
 def simple_compare(data:cbUtils.CallbackDatapack):
-    func_override_key = "simple_compare_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-
-    active_node:BaseType.BaseNode = data.active_node
-    goal_node = data.goal_node
-    settings = merge_overrides(data.base_parameter, section_overrides)
+    settings = default_handle_run_input("simple_compare_override", data)
 
     variable_value = None
     split_names = settings["variable"].split(".")
@@ -230,12 +229,12 @@ def simple_compare(data:cbUtils.CallbackDatapack):
     elif settings["operator"] == "!=":
         return variable_value != benchmark
     
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type":"object", "properties":{
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="update_timeout_override", schema={"type":"object", "properties":{
     "objects": {"onfOf":[
         {"type":"string", "enum":[choice.value for choice in NODES_AND_SESSION]},
         {"type":"array", "items":{"type":"string","enum":[choice.value for choice in NODES_AND_SESSION]}}]},
     "seconds": {"type": "number"}
-}, "required":["objects"]})
+}, "required":["objects"]}, description_blurb="updates timeout to be provided seconds from now")
 def update_timeout(data:cbUtils.CallbackDatapack):
     """updates the values of timeout to number of seconds in the future for the nodes or sessions listed. If `seconds` isn't specified, defaults to 3 and 10 minutes
     for nodes and sessions respectively"""
@@ -277,7 +276,7 @@ def update_timeout(data:cbUtils.CallbackDatapack):
             time = timedelta(seconds=settings["seconds"])
         goal_node.session.set_TTL(time)
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type":"object", "properties":{
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="call_on_object_override", schema={"type":"object", "properties":{
     "grab_location": {
         "type": "string",
         "description": "what to grab from event",
@@ -291,13 +290,9 @@ def update_timeout(data:cbUtils.CallbackDatapack):
             "pattern": REGEX_OR_OUTPUT_SOURCES+"(\.[\w\d]*)+"
         }
     }
-}})
+}}, description_blurb="calls function at grab_location and stores result value")
 async def call_on_object(data:cbUtils.CallbackDatapack):
-    func_override_key = "call_on_object_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    section_parameter = default_handle_run_input("call_on_object_override", data)
     grab_location_name = section_parameter["grab_location"]
     save_locations = section_parameter("save_locations")
 
@@ -315,19 +310,15 @@ async def call_on_object(data:cbUtils.CallbackDatapack):
 
     handle_save_data(save_data, save_locations, data)
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type":"object", "properties":{
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="delete_data_override", schema={"type":"object", "properties":{
     "location": {
         "type": "string",
         "description": "what to grab from event",
         "pattern": REGEX_OR_INPUT_SOURCES+"(\.[\w\d]*)+"
     }
-}})
+}}, description_blurb="delets value at location")
 def delete_data(data:cbUtils.CallbackDatapack):
-    func_override_key = "delete_data_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    section_parameter = merge_overrides(data.base_parameter, section_overrides)
+    section_parameter = default_handle_run_input("delete_data_override", data)
     grab_location_name = section_parameter["location"]
 
     if grab_location_name is None:
@@ -345,17 +336,13 @@ def delete_data(data:cbUtils.CallbackDatapack):
     elif isinstance(grab_location, dict):
         del grab_location[split_grab[-1]]
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], has_parameter="always", schema={
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="has_data_override", schema={
     "type": "string",
     "description": "what to grab from event",
     "pattern": REGEX_OR_INPUT_SOURCES+"(\.[\w\d]*)+"
-})
+}, description_blurb="checks if given location exists")
 def has_data(data:cbUtils.CallbackDatapack):
-    func_override_key = "has_data_override"
-    location_name = data.base_parameter
-    if func_override_key in data.section_data:
-        location_name = data.section_data[func_override_key]
-        del data.section_data[func_override_key]
+    location_name = default_handle_run_input("has_data_override", data)
 
     if location_name is None:
         return
@@ -374,15 +361,15 @@ def has_data(data:cbUtils.CallbackDatapack):
     return False
 
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], description_blurb="always says False")
 def always_false_filter(data:cbUtils.CallbackDatapack):
     return False
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], description_blurb="always says True")
 def always_true_filter(data:cbUtils.CallbackDatapack):
     return True
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION])
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], description_blurb="internally acknowledge something happened")
 def debugging_action(data:cbUtils.CallbackDatapack):
     print(f"DEBUGGING ACTION!! For node <{id(data.active_node)}><{data.active_node.graph_node.id}> event <{id(data.event)}><{type(data.event)}>")
 

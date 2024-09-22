@@ -137,6 +137,10 @@ class DialogHandler():
             ]
         )
         '''consolidated list of tasks to do by handler'''
+
+        self.graph_node_validation_status = Cache.MultiIndexer()
+        '''stores information about status of validation of the definitions of graph nodes read from yaml. make sure this is always up to date of any changes to graph node settings'''
+
         self.settings = settings if settings is not None else HandlerSettings()
 
         self.cleaning_task = None
@@ -163,6 +167,7 @@ class DialogHandler():
           or graph node definition badly formatted.'''
         #TODO: second pass ok and debug running
         self.graph_node_indexer.clear()
+        self.graph_node_validation_status.clear()
         nodeParser.parse_files(*file_names, existing_nodes=self.graph_node_indexer.cache)
 
     def add_graph_nodes(self, node_list:"dict[str, BaseType.BaseGraphNode]"={}, overwrites_ok=False):
@@ -172,6 +177,7 @@ class DialogHandler():
         for node_id, node in node_list.items():
             if node.id in self.graph_node_indexer:
                 if overwrites_ok:
+                    self.graph_node_validation_status.remove_item(node_id)
                     self.graph_node_indexer.add_item(node_id, node)
                 else:
                     # possible exception, want to have setting for whether or not it gets thrown
@@ -180,38 +186,61 @@ class DialogHandler():
             else:
                 self.graph_node_indexer.add_item(node_id, node)
     
-    def add_files(self, file_names:"list[str]"=[]):
+    def add_files(self, file_names:"list[str]"=[], overwrites_ok=False):
         #TODO: second pass ok and debug running
         # note if trying to create a setting to ignore redifinition exceptions, this won't work since can't sort out redefinitions exceptions from rest
-        nodeParser.parse_files(*file_names, existing_nodes=self.graph_node_indexer.cache)
-        self.graph_node_indexer.reindex()
+        extras_from_files = nodeParser.parse_files(*file_names)
+        self.add_graph_nodes(extras_from_files, overwrites_ok=overwrites_ok)
 
     def reload_files(self, file_names:"list[str]"=[]):
         updated_nodes = nodeParser.parse_files(*file_names, existing_nodes={})
         for k, node in updated_nodes.items():
             exec_log.info(f"updated/created node {node.id}")
             self.graph_node_indexer.set_item(k, node)
+            self.graph_node_validation_status.remove_item(k)
 
-    def final_validate(self):
-        #TODO: maybe clean up and split so this can do minimal work on new nodes? or maybe just wait until someone adds all nodes?
-        #TODO: smarter caching of what is validated
 
-        def validate_function_list(function_section_info:ValidationUtils.FunctionSectionInfo):
+    '''#############################################################################################
+    ################################################################################################
+    ####                                   VALIDATE GRAPH NODES SECTION
+    ################################################################################################
+    ################################################################################################'''
+
+    def validate_graph_node(self, graph_node_name):
+        graph_node:BaseType.BaseGraphNode = self.graph_node_indexer.get(graph_node_name)
+        if graph_node is None:
+            return None
+        else:
+            graph_node = graph_node[0]
+        next_nodes, function_sections_info = graph_node.get_validation_info()
+        if graph_node_name not in self.graph_node_validation_status:
+            warning_list = []
+            for function_section in function_sections_info:
+                warning_list.extend(self.validate_function_list(function_section))
+            self.graph_node_validation_status.add_item(graph_node_name, {"yaml_warnings": warning_list}) 
+        return next_nodes
+    
+
+    def validate_function_list(self, function_section_info:ValidationUtils.FunctionSectionInfo):
             func_list = function_section_info.function_list
             node_id = function_section_info.node_id
             purpose = function_section_info.purpose
             string_rep = function_section_info.section_name
             event_type = function_section_info.event_type
+            warning_list = []
             for callback in func_list:
                 if type(callback) is str:
                     func_name = callback
                     args = None
                 elif issubclass(callback.__class__, SectionUtils.SubSection):
                     if isinstance(callback, SectionUtils.IfSubSection):
-                        validate_function_list(ValidationUtils.FunctionSectionInfo(callback.filters, node_id, POSSIBLE_PURPOSES.FILTER, string_rep+" filters for if statement", event_type=event_type))
-                        validate_function_list(ValidationUtils.FunctionSectionInfo(callback.actions, node_id, purpose, string_rep+" actions for if statement", event_type=event_type))
+                        if_filter_warnings = self.validate_function_list(ValidationUtils.FunctionSectionInfo(callback.filters, node_id, POSSIBLE_PURPOSES.FILTER, string_rep+" filters for if statement", event_type=event_type))
+                        if_action_warnings = self.validate_function_list(ValidationUtils.FunctionSectionInfo(callback.actions, node_id, purpose, string_rep+" actions for if statement", event_type=event_type))
+                        warning_list.extend(if_filter_warnings)
+                        warning_list.extend(if_action_warnings)
                     elif issubclass(callback.__class__, SectionUtils.LogicOpSubSection):
-                        validate_function_list(ValidationUtils.FunctionSectionInfo(callback.callbacks, node_id, purpose, string_rep, event_type=event_type))
+                        subsection_warnings = self.validate_function_list(ValidationUtils.FunctionSectionInfo(callback.callbacks, node_id, purpose, string_rep, event_type=event_type))
+                        warning_list.extend(subsection_warnings)
                     continue
                 else:
                     func_name = list(callback.keys())[0]
@@ -228,9 +257,11 @@ class DialogHandler():
                 # elif func_ref.has_parameter is None and args is not None:
                 #     raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, function not meant to take arguments, extra values passed")
                 
-                if args is not None:
+                if func_ref.runtime_input_key is None:
+                    # if takes runtime input then the yaml might not be complete, can't check validation
+                    # assuming if runtime input key not set then not taking stuff from runtime ever so all parameters must be to schema
                     # if there are args, try to make sure they fit definitions
-                    # args provided at runtime aren't checked
+                    # args provided at runtime aren't auto checked
                     try:
                         validate(args, func_ref.schema)
                     except ValidationError as ve:
@@ -238,18 +269,30 @@ class DialogHandler():
                         path = string_rep
                         if len(path_elements) > 0:
                             path+="."+'.'.join(path_elements)
-                        except_message = f"Exception in verifying node {node_id}, "\
-                                        f"yaml definition provided for function {func_name} listed in section {string_rep} does not fit expected format "\
+                        except_message = f"Exception in verifying node '{node_id}', "\
+                                        f"yaml definition provided for function '{func_name}' listed in section '{string_rep}' does not fit expected format "\
                                         f"error message: {ve.message}"
                         raise Exception(except_message)
+                else:
+                    try:
+                        validate(args, func_ref.schema)
+                    except ValidationError as ve:
+                        path_elements = [str(x) for x in ve.absolute_path]
+                        path = string_rep
+                        if len(path_elements) > 0:
+                            path+="."+'.'.join(path_elements)
+                        except_message = f"yaml definition provided for function '{func_name}' listed in section '{string_rep}' does not fit expected format "\
+                                        f"error message: {ve.message}"
+                        warning_list.append(except_message)
+            return warning_list
 
+    def final_validate(self):
+        #TODO: maybe clean up and split so this can do minimal work on new nodes? or maybe just wait until someone adds all nodes?
+        #TODO: smarter caching of what is validated
         explored=set()
         dependent=set()
         for node_id in self.graph_node_indexer.cache:
-            graph_node:BaseType.BaseGraphNode = self.graph_node_indexer.get(node_id)[0]
-            next_nodes, function_sections_info = graph_node.get_validation_info()
-            for function_section in function_sections_info:
-                validate_function_list(function_section)
+            next_nodes = self.validate_graph_node(node_id)
             explored.add(node_id)
             if node_id in dependent:
                 dependent.remove(node_id)
@@ -276,14 +319,14 @@ class DialogHandler():
             function works in handler. see CallbackUtils for settings
         * override_settings -  `dict[str, Any]`
             dict holding setting name to settings this handler should override function's default ones with. currently only looks for
-            'allowed_sections' and 'cb_key'
+            'allowed_purposes' and 'cb_key'
             
         Return
         ---
         boolean for if function was successfully registered'''
-        permitted_purposes = func.allowed_sections
-        if "allowed_sections" in override_settings:
-            permitted_purposes = copy.deepcopy(override_settings["allowed_sections"])
+        permitted_purposes = func.allowed_purposes
+        if "allowed_purposes" in override_settings:
+            permitted_purposes = copy.deepcopy(override_settings["allowed_purposes"])
 
         if permitted_purposes is None or len(permitted_purposes) < 1:
             exec_log.warning(f"dialog handler tried registering a function <{func.__name__}> that does not have any permitted sections")
@@ -304,7 +347,7 @@ class DialogHandler():
                                         "Be aware yaml has to match the key registered with")
 
         dev_log.debug(f"handler id'd {id(self)} registered callback <{func}> with key <{cb_key}> {'same as default,' if cb_key == func.cb_key else 'overridden,'} for purposes: " +\
-                            f"<{[purpose.name for purpose in permitted_purposes]}> {'same as default' if permitted_purposes == func.allowed_sections else 'overridden'}")
+                            f"<{[purpose.name for purpose in permitted_purposes]}> {'same as default' if permitted_purposes == func.allowed_purposes else 'overridden'}")
         #TODO: this needs upgrading if doing qualified names
         self.functions_cache.add_item(cb_key, {"ref": func, "permitted_purposes": permitted_purposes, "registered_key": cb_key})
         return True
@@ -346,7 +389,7 @@ class DialogHandler():
                 raise Exception(f"checking if <{func_key}> can run during phase {purpose} but it is not registered")
             return False
         if purpose not in self.functions_cache.get_ref(func_key)["permitted_purposes"]:
-            # note, not accessing function.allowed_sections because this field contains overridden values from registering
+            # note, not accessing function.allowed_purposes because this field contains overridden values from registering
             exec_log.warn(f"checking if <{func_key}> can run during phase <{purpose}> but it is not allowed")
             if escalate_errors:
                 raise Exception(f"checking if <{func_key}> can run during phase {purpose} but it is not allowed")

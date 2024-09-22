@@ -17,7 +17,7 @@ clean_test_logger = logging.getLogger("test-clean")
 logHelper.use_default_setup(clean_test_logger)
 clean_test_logger.setLevel(logging.DEBUG)
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter="always")
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION], runtime_input_key="always")
 async def sleep(active_node, event, duration, occurance_tracker={}):
     if id(active_node) not in occurance_tracker:
         occurance_tracker[id(active_node)] = "started"

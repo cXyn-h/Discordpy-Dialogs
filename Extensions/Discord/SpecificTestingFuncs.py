@@ -38,7 +38,7 @@ def save_survey_answer(data:cbUtils.CallbackDatapack):
         if survey_name not in goal_node.session.data:
             goal_node.session.data[survey_name] = {}
         goal_node.session.data[survey_name].update(to_save_data)
-cbUtils.set_callback_settings(save_survey_answer, allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter='always', schema={"type": "object", "properties":{ 
+cbUtils.set_callback_settings(save_survey_answer, allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key='always', schema={"type": "object", "properties":{ 
     "survey_name": {"type": "string"},
     "key": {"type": "string"},
     "save_locations": {"onfOf":[{"type": "string", "enum":["current_session", "next_session"]}, {"type":"array", "items": {"type": "string", "enum":["current_session", "next_session"]}}]}
@@ -55,7 +55,7 @@ async def report_survey_ansers(data:cbUtils.CallbackDatapack):
     message_to_send = "Here is what you responded:\n"+ "\n".join([k+": "+str(v) for k,v in active_node.session.data[settings["survey_name"]].items()])
     data.base_parameter = {"ping_with_reply": True, "message":{"content":message_to_send}, "menu_name": settings["survey_name"]+"_report"}
     await DiscordFuncs.send_message(data)
-cbUtils.set_callback_settings(report_survey_ansers, allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter='always', schema={"type": "object", "properties":{ 
+cbUtils.set_callback_settings(report_survey_ansers, allowed_purposes=[POSSIBLE_PURPOSES.ACTION], runtime_input_key='always', schema={"type": "object", "properties":{ 
     "survey_name": {"type": "string"}}, "required": ["survey_name"]
 })
 

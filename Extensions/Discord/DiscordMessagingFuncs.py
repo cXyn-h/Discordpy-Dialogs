@@ -56,10 +56,11 @@ async def send_message(data:cbUtils.CallbackDatapack):
     bot = data.bot
 
     # override yaml with anything that is generated in function_data
+    runtime_input_key = "next_message_settings"
     settings = data.base_parameter
-    if "next_message_settings" in data.section_data:
-        settings = merge_message_settings(data.base_parameter if data.base_parameter is not None else {}, data.section_data["next_message_settings"])
-        del data.section_data["next_message_settings"]
+    if runtime_input_key in data.section_data:
+        settings = merge_message_settings(data.base_parameter if data.base_parameter is not None else {}, data.section_data[runtime_input_key])
+        del data.section_data[runtime_input_key]
     
     discord_logger.debug(f"send message settings chosen are <{settings}>")
 
@@ -211,7 +212,7 @@ async def send_message(data:cbUtils.CallbackDatapack):
             active_node.record_menu_message(settings["menu_name"], sent_message_info)
             #TODO: TEST out this with timeout event now being able to grab and save data
             data.section_data["previous_message"] = sent_message_info     
-cbUtils.set_callback_settings(send_message, schema="FuncSchemas/sendMessageSchema.yml", has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(send_message, schema="FuncSchemas/sendMessageSchema.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION])
 
 async def edit_message(data:cbUtils.CallbackDatapack):
     '''callback that edits the menu specified or previous message'''
@@ -329,32 +330,39 @@ async def edit_message(data:cbUtils.CallbackDatapack):
                 sent_message = await event.channel.send(**redirect_message)
             active_node.record_menu_message(settings["menu_name"]+"_redirect", DiscordUtils.NodetionDCMenuInfo(sent_message, redirect_message["view"]))
     discord_logger.debug(f"finished")
-cbUtils.set_callback_settings(edit_message, schema="FuncSchemas/editMessageSchema.yml", has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(edit_message, schema="FuncSchemas/editMessageSchema.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION])
 
 def setup_next_message(data:cbUtils.CallbackDatapack):
     settings = data.base_parameter
     if "next_message_settings" in data.section_data:
+        # if there already are settings, then merge what we want to input into that
         next_message_settings = data.section_data["next_message_settings"]
     else:
+        # no settings so can just set up new
         next_message_settings = {}
     merge_message_settings(next_message_settings, settings)
     data.section_data["next_message_settings"] = next_message_settings
     discord_logger.debug(f"set up next message settings, stored in section data. {data.section_data.keys()}")
-cbUtils.set_callback_settings(setup_next_message, schema="FuncSchemas/sendMessageSchema.yml", has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(setup_next_message, schema="FuncSchemas/sendMessageSchema.yml", allowed_purposes=[POSSIBLE_PURPOSES.ACTION])
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter='optional', schema={"type":"object", "properties":{
-    "channel_id": {"type":"string", "pattern": "((dm:|pm:)?[0-9]{17,19}|(dm:|pm:))"},
-    "targets": {"onfOf":[
-        {"type": "string", "enum": ["current_session", "current_node"]}, 
-        {"type":"array", "items": {"type": "string", "enum": ["current_session", "current_node"]}}
-    ]}
-}})
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION], schema={
+    "oneOf":[
+        {
+            "type":"object", "properties":{
+                "channel_id": {"type":"string", "pattern": "((dm:|pm:)?[0-9]{17,19}|(dm:|pm:))"},
+                "targets": {"onfOf":[
+                    {"type": "string", "enum": ["current_session", "current_node"]}, 
+                    {"type":"array", "items": {"type": "string", "enum": ["current_session", "current_node"]}}
+                ]}
+            }
+        },
+        {"type":"null"}
+    ]
+    })
 def mark_default_channel(data:cbUtils.CallbackDatapack):
     '''adds to node and/or session a channel id that can be used as default location to send messages to. gets channel id either from yaml `channel_id`
     or from the last message sent in the action section this is used in'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
-    event = data.event
-    func_data = data.section_data
     settings = data.base_parameter
 
     discord_logger.debug(f"default channel starting")
@@ -371,7 +379,7 @@ def mark_default_channel(data:cbUtils.CallbackDatapack):
     elif "previous_message" in data.section_data:
         channel_id = data.section_data["previous_message"].message.channel.id
     else:
-        return None
+        raise Exception("call to function handling Discord interactions 'mark_default_channel' could not complete")
 
     if "current_session" in targets and active_node.session is not None:
         active_node.session.data["default_channel"] = channel_id
@@ -402,12 +410,16 @@ async def clear_buttons(data:cbUtils.CallbackDatapack):
             await menu_message_info.message.edit(content=closed_message, view=None)
         else:
             await menu_message_info.message.edit(view=None)
-cbUtils.set_callback_settings(clear_buttons, has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], schema={
-    "type": "object", "properties":{
-        "timeout":{"type":"string"}, 
-        "closed":{"type":"string"}, 
-        "close_menus":{"type":"array", "items": {"type": "string"}}
-        }
+cbUtils.set_callback_settings(clear_buttons, allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], schema={
+    "oneOf": [{
+        "type": "object", "properties":{
+            "timeout":{"type":"string"}, 
+            "closed":{"type":"string"}, 
+            "close_menus":{"type":"array", "items": {"type": "string"}}
+            }
+        },
+        {"type": "null"}
+    ]
 })
 
 def clicked_this_menu(data:cbUtils.CallbackDatapack):
@@ -424,9 +436,14 @@ def clicked_this_menu(data:cbUtils.CallbackDatapack):
         if menu_name in filter_menus and menu_message_info.message.id == event.message.id:
             return True
     return False
-cbUtils.set_callback_settings(clicked_this_menu, allowed_sections=[POSSIBLE_PURPOSES.FILTER], has_parameter="optional", schema = {
-    "type": "array",
-    "items": {"type": "string"}
+cbUtils.set_callback_settings(clicked_this_menu, allowed_purposes=[POSSIBLE_PURPOSES.FILTER], schema = {
+    "oneOf": [
+        {
+        "type": "array",
+        "items": {"type": "string"}
+        },
+        {"type": "null"}
+    ]
 })
 
 async def remove_message(data:cbUtils.CallbackDatapack):
@@ -450,30 +467,33 @@ async def remove_message(data:cbUtils.CallbackDatapack):
             await active_node.delete_all_replies()
         except discord.Forbidden as e:
             pass
-cbUtils.set_callback_settings(remove_message, allowed_sections=[POSSIBLE_PURPOSES.ACTION], has_parameter="optional", schema={"oneOf":[
-    {"type":"string"}, {"type":"array", "items":{"type":"string"}}]})
+cbUtils.set_callback_settings(remove_message, allowed_purposes=[POSSIBLE_PURPOSES.ACTION], schema={"oneOf":[
+    {"type":"null"}, {"type":"string"}, {"type":"array", "items":{"type":"string"}}]})
 
 def button_is(data:cbUtils.CallbackDatapack):
     '''filter or transition function checks if button event is one of allowed ones passed in custom_ids'''
     func_override_key = "button_is_override"
     custom_ids = copy.deepcopy(data.base_parameter)
     if func_override_key in data.section_data:
-        custom_ids = data.section_data.get(func_override_key, None)
+        custom_ids = data.section_data.get(func_override_key, [])
         del data.section_data[func_override_key]
 
     event = data.event
     if isinstance(custom_ids, str):
         return event.data["custom_id"] == custom_ids
-    else:
+    elif isinstance(custom_ids, list):
         return event.data["custom_id"] in custom_ids
-cbUtils.set_callback_settings(button_is, has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.FILTER], schema={
+    else:
+        return False
+cbUtils.set_callback_settings(button_is, runtime_input_key="button_is_override", allowed_purposes=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.FILTER], schema={
     "oneOf":[
+        {"type":"null"},
         {"type":["string", "integer"]},
         {"type":"array", "items":{"type":["string", "integer"]}}
     ]
 })
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.FILTER], has_parameter="optional", schema={
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.TRANSITION_FILTER, POSSIBLE_PURPOSES.FILTER], runtime_input_key="is_allowed_user_override", schema={
     "onfOf":[
         {"type": "string", "enum": [a.value for a in NodetionBaseFuncs.NODES_AND_SESSION]}, 
         {"type":"array", "items": {"type": "string", "enum": [a .value for a in NodetionBaseFuncs.NODES_AND_SESSION]}}
@@ -486,11 +506,13 @@ def is_allowed_user(data:cbUtils.CallbackDatapack):
     func_override_key = "is_allowed_user_override"
     targets = copy.deepcopy(data.base_parameter)
     if func_override_key in data.section_data:
-        targets = data.section_data.get(func_override_key, None)
+        targets = data.section_data.get(func_override_key, [])
         del data.section_data[func_override_key]
 
     if isinstance(targets, str):
         targets = [targets]
+    elif targets is None:
+        return False
     discord_logger.debug(f"final targets to check is {targets}")
 
     event = data.event
@@ -523,7 +545,7 @@ def is_allowed_user(data:cbUtils.CallbackDatapack):
     discord_logger.debug(f"is allowed finished checks, result {user.id in allowed_set}")
     return user.id in allowed_set
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_ACTION, POSSIBLE_PURPOSES.ACTION], has_parameter="optional", schema={
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.TRANSITION_ACTION, POSSIBLE_PURPOSES.ACTION], runtime_input_key="mark_allowed_user_override", schema={
     "onfOf":[
         {"type": "string", "enum": [a.value for a in NodetionBaseFuncs.NODES_AND_SESSION]}, 
         {"type":"array", "items": {"type": "string", "enum": [a.value for a in NodetionBaseFuncs.NODES_AND_SESSION]}}
@@ -538,8 +560,9 @@ def mark_allowed_user(data:cbUtils.CallbackDatapack):
         targets = data.section_data.get(func_override_key, None)
         del data.section_data[func_override_key]
     
-
-    if isinstance(targets, str):
+    if targets is None:
+        return
+    elif isinstance(targets, str):
         targets = [targets]
 
     event = data.event
@@ -568,35 +591,38 @@ def mark_allowed_user(data:cbUtils.CallbackDatapack):
                 location["allowed_users"] = set()
             location["allowed_users"].add(user.id)
 
-@cbUtils.callback_settings(has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.FILTER], schema={
-    "type":"array", 
-    "items":{"oneOf": [
-        {"type": "string"},
-        {"type": "integer"}
-    ]}
+@cbUtils.callback_settings(runtime_input_key="is_reply_override", allowed_purposes=[POSSIBLE_PURPOSES.FILTER], schema={
+    "oneOf": [
+        {
+            "type":"array", 
+            "items":{"oneOf": [
+                {"type": "string"},
+                {"type": "integer"}
+            ]}
+        },
+        {"type": "null"}
+    ]
 })
 def is_reply(data:cbUtils.CallbackDatapack):
     '''filter function that checks if message event is replying to menu message, with settings to check if it is a reply to secondary or reply messages'''
     func_override_key = "is_reply_override"
-    section_overrides = data.section_data.get(func_override_key, [])
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
     settings = copy.deepcopy(data.base_parameter)
-    if section_overrides:
-        settings = section_overrides
+    # settings is None or list
+    if func_override_key in data.section_data:
+        if data.section_data.get(func_override_key, None) is not None:
+            # if there is something to override with, do so
+            settings = data.section_data.get(func_override_key, [])
+        del data.section_data[func_override_key]
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    settings = data.base_parameter
-
-    #TODO: combine yaml parameters with function data
 
     if not hasattr(event, "reference") or event.reference is None:
         return False
-    if active_node.check_tracking(event.reference.message_id) is None:
-        return False
-
-    if settings:
-        # assuming theres a subset of message that can be replied to
+    if settings is None:
+        # assume meant as reply to any message tracked by this node is ok. can be done by checking if replied to message id is tracked by node
+        return active_node.check_tracking(event.reference.message_id) is None
+    else:
+        # assume settings define a subset of messages that are what we want to check if is a reply to
         to_check_message_ids = set()
         for item in settings:
             # passed in can be menu names, message ids, or keywords
@@ -620,17 +646,13 @@ def is_reply(data:cbUtils.CallbackDatapack):
                     except Exception as e:
                         pass
             else:
-                # is a number
+                # is a number. assume message id
                 to_check_message_ids.add(item)
 
         return event.reference.message_id in to_check_message_ids
-    else:
-        # no settings passed, assuming this means a check that it is a reply to any message tracked by node, menu or reply
-        # already filtered out all bad cases for this path
-        return True
     
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter='optional', schema={
-    "onfOf":[{"type": "string"}, {"type":"array", "items": {"type": "string"}}]})
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.TRANSITION_ACTION], schema={
+    "onfOf":[{"type":"null"}, {"type": "string"}, {"type":"array", "items": {"type": "string"}}]})
 def transfer_menus(data:cbUtils.CallbackDatapack):
     '''transition action that moves the menu message from this node to the next node so the next node can edit the message instead of
     sending a new one'''
@@ -643,12 +665,13 @@ def transfer_menus(data:cbUtils.CallbackDatapack):
     if settings is None:
         settings = list(active_node.menu_messages_info.keys())
     
+    # settings is list of strings for next part    
     for menu_name in settings:
         if menu_name in active_node.menu_messages_info:
             goal_node.record_menu_message(menu_name, active_node.menu_messages_info[menu_name])
             del active_node.menu_messages_info[menu_name]
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter='optional', schema={
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key='rename_menu_override', schema={
     "type":"object", "properties":{
         "target": {"type":"string", "enum": [a.value for a in NodetionBaseFuncs.NODES]},
         "from":{"type": "string"},
@@ -658,12 +681,8 @@ def transfer_menus(data:cbUtils.CallbackDatapack):
 def rename_menu(data:cbUtils.CallbackDatapack):
     '''transition action that moves the menu message from this node to the next node so the next node can edit the message instead of
     sending a new one'''
-    func_override_key = "rename_menu_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    settings = copy.deepcopy(data.base_parameter)
-    settings.update(section_overrides)
+    settings = NodetionBaseFuncs.default_handle_run_input("rename_menu_override", data)
+    
     active_node:DiscordNodeType.DiscordNode = data.active_node
     goal_node:DiscordNodeType.DiscordNode = data.goal_node
     
@@ -681,7 +700,7 @@ def rename_menu(data:cbUtils.CallbackDatapack):
     node.menu_messages_info[settings["to"]] = node.menu_messages_info[settings["from"]]
     del node.menu_messages_info[settings["from"]]
 
-@cbUtils.callback_settings(has_parameter="optional", allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], schema={"type":"object",
+@cbUtils.callback_settings(runtime_input_key="selection_is_override", allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], schema={"type":"object",
     "properties":{
         "custom_id":{"type":"string"},
         "selection":{"oneOf":[
@@ -696,11 +715,7 @@ def selection_is(data:cbUtils.CallbackDatapack):
     # array is one single group with multiple options selected
     # array of groups requires each group has array type to differentiate this from single group
     func_override_key = "selection_is_override"
-    section_overrides = data.section_data.get(func_override_key, {})
-    if func_override_key in data.section_data:
-        del data.section_data[func_override_key]
-    settings = copy.deepcopy(data.base_parameter)
-    settings.update(section_overrides)
+    settings = NodetionBaseFuncs.default_handle_run_input("selection_is_override", data)
 
     event = data.event
 
@@ -736,7 +751,14 @@ def selection_is(data:cbUtils.CallbackDatapack):
             return True
     return False
 
-@cbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], has_parameter="Optional", schema={"type":["string","integer"]})
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], schema={
+    "oneOf": [
+        {
+            "type":["string","integer"]
+        },
+        { "type":"null"}
+    ]
+})
 def is_server_member(data:cbUtils.CallbackDatapack):
     active_node = data.active_node
     event = data.event
@@ -761,45 +783,15 @@ def is_server_member(data:cbUtils.CallbackDatapack):
         user = event.author
     return server.get_member(user.id) is None
 
-#TODO: ALL FUNCTIONS BELOW HERE ARE DEPRECATED
-async def send_DM(data:cbUtils.CallbackDatapack):
-    active_node = data.active_node
-    event = data.event
-    settings = data.base_parameter
-    if isinstance(event, Interaction):
-        user = event.user
-    else:
-        user = event.author
-
-    dm_channel = user.dm_channel
-    if dm_channel == None:
-        dm_channel = await user.create_dm()
-
-    if "redirect" not in settings:
-        settings["redirect"] = {}
-    settings["redirect"]["dest_channel_id"] = dm_channel.id
-    await send_message(data)
-cbUtils.set_callback_settings(send_DM, schema="FuncSchemas/sendMessageSchema.yml", has_parameter="always", allowed_sections=[POSSIBLE_PURPOSES.ACTION])
-
 def is_in_DM(data:cbUtils.CallbackDatapack):
     event = data.event
     # this works for Discord Message, Context, or Interaction
     return event.channel.type == discord.ChannelType.private
-cbUtils.set_callback_settings(is_in_DM, allowed_sections=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
-
-def is_a_bot(data:cbUtils.CallbackDatapack):
-    event = data.event
-    if isinstance(event, Interaction):
-        user = event.user
-    else:
-        user = event.author
-    
-    return user.bot
-cbUtils.set_callback_settings(is_a_bot, allowed_sections=[POSSIBLE_PURPOSES.FILTER])
+cbUtils.set_callback_settings(is_in_DM, allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], description_blurb="checks if event happened in dm")
 
 dialog_func_info = {send_message:{}, clear_buttons:{}, setup_next_message:{},
                     clicked_this_menu:{}, button_is:{}, remove_message:{},
                     is_allowed_user:{}, mark_allowed_user:{},
                     is_reply:{}, selection_is:{}, edit_message:{},
                     transfer_menus:{}, is_server_member:{}, mark_default_channel:{}, rename_menu:{},
-                    is_in_DM:{}, is_a_bot:{}}
+                    is_in_DM:{}}

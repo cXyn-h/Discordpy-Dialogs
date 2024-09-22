@@ -40,7 +40,7 @@ nodes:
             cycles: 3
 '''
 
-@NodetionCbUtils.callback_settings(allowed_sections=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], has_parameter="always", schema={"type": "number"})
+@NodetionCbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="always", schema={"type": "number"})
 async def wait(datapack:NodetionCbUtils.CallbackDatapack):
     time = int(datapack.base_parameter["time"])
     for i in range(datapack.base_parameter["cycles"]):

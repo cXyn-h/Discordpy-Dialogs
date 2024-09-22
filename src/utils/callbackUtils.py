@@ -6,40 +6,40 @@ import os
 from src.utils.Enums import POSSIBLE_PURPOSES
 #TODO: implement allowed events
 #TODO: implement allowed nodes
-def callback_settings(schema:typing.Union[dict, str]=None, allowed_sections:'list[POSSIBLE_PURPOSES]'=None, has_parameter:typing.Literal["always", "optional", None]=None, 
-                      cb_key:str=None, allowed_events:"list[str]"=None, allowed_nodes:"list[str]"=None):
+def callback_settings(schema:typing.Union[dict, str]=None, allowed_purposes:'list[POSSIBLE_PURPOSES]'=None, runtime_input_key:typing.Optional[str]=None, 
+                      cb_key:str=None, description_blurb="", allowed_events:"list[str]"=None, allowed_nodes:"list[str]"=None):
     '''decorator to set all the settings for how to use function in callbacks. Records settings as attributes on function.
-    has to be first in decorator list on a function. if can't, use builtin setattr or provided set_callback_settings
+    Has to be first in decorator list on a function. if can't, use builtin setattr or provided set_callback_settings
     
     Parameters
     ---
     `schema` - Union[dict, str]
         loaded schema or path to yaml file - that has schema to validate function input - relative from where file that holds function is. stores as loaded dictionary
-    `allowed_sections` - list[POSSIBLE_PURPOSES]
+    `allowed_purposes` - list[POSSIBLE_PURPOSES]
         what section of callbacks that function is meant for. can be one of the four values for utils.Enums.POSSIBLE_PURPOSES enum: FILTER, ACTION, TRANSITION_FILTER, TRANSITION_ACTION
-    `has_parameter` - "always", "optional" or None
-        whether the function always needs, optionally takes, or never takes a parameter
+    `runtime_input_key` - str or None
+        name of key this callback will accept parameters from runtime at
     `cb_key` - str
         per function setting for the key that will be used in yaml to specify this function, overrideable by individual handlers
     allowed_events - list[str]
         WIP yet to implement, events that this function can handle
     allowed_nodes - list[str]
         WIP yet to implement, node types that can use this function'''
-    return lambda func: set_callback_settings(func=func, schema=schema, allowed_sections=allowed_sections, 
-                                              has_parameter=has_parameter, cb_key=cb_key, allowed_events=allowed_events, allowed_nodes=allowed_nodes)
+    return lambda func: set_callback_settings(func=func, schema=schema, allowed_purposes=allowed_purposes, 
+                                              runtime_input_key=runtime_input_key, cb_key=cb_key, description_blurb=description_blurb, allowed_events=allowed_events, allowed_nodes=allowed_nodes)
 
-def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_sections:'list[POSSIBLE_PURPOSES]'=None, has_parameter:typing.Literal["always", "optional", None]=None, 
-                          cb_key:str=None, allowed_events:"list[str]"=None, allowed_nodes:"list[str]"=None):
+def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_purposes:'list[POSSIBLE_PURPOSES]'=None, runtime_input_key:typing.Optional[str]=None, 
+                          cb_key:str=None, description_blurb="", allowed_events:"list[str]"=None, allowed_nodes:"list[str]"=None):
     '''function that sets all the settings for how to use function in callbacks. Records settings as attributes on function.
     
     Parameters
     ---
     `schema` - Union[dict, str]
         loaded schema or path to yaml file - that has schema to validate function input - relative from where file that holds function is. stores as loaded dictionary
-    `allowed_sections` - list[POSSIBLE_PURPOSES]
+    `allowed_purposes` - list[POSSIBLE_PURPOSES]
         what section of callbacks that function is meant for. can be one of the four values for utils.Enums.POSSIBLE_PURPOSES enum: FILTER, ACTION, TRANSITION_FILTER, TRANSITION_ACTION
-    `has_parameter` - "always", "optional" or None
-        whether the function always needs, optionally takes, or never takes a parameter
+    `runtime_input_key` - str or None
+        name of key this callback will accept parameters from runtime at
     `cb_key` - str
         per function setting for the key that will be used in yaml to specify this function, overrideable by individual handlers
     allowed_events - list[str]
@@ -47,11 +47,11 @@ def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_sec
     allowed_nodes - list[str]
         WIP yet to implement, node types that can use this function'''
     filtered_allowed_sections = set()
-    if allowed_sections is not None:
-        for section in allowed_sections:
-            if type(section) is POSSIBLE_PURPOSES:
-                filtered_allowed_sections.add(section)
-    func.allowed_sections = list(filtered_allowed_sections)
+    if allowed_purposes is not None:
+        for purpose in allowed_purposes:
+            if type(purpose) is POSSIBLE_PURPOSES:
+                filtered_allowed_sections.add(purpose)
+    func.allowed_purposes = list(filtered_allowed_sections)
     if type(schema) is str:
         stk = inspect.stack()[1]
         mod = inspect.getmodule(stk[0])
@@ -62,14 +62,15 @@ def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_sec
         real_path = os.path.abspath(os.path.join("/".join(split_module_path[:-1]), schema))
         schema = yaml.safe_load(open(real_path))
     func.schema = schema if schema is not None else {}
-    func.has_parameter = has_parameter
+    func.runtime_input_key = runtime_input_key
     func.cb_key = cb_key or func.__name__
     func.allowed_events = allowed_events if allowed_events else []
     func.alowed_nodes = allowed_nodes if allowed_nodes else []
+    func.description_blurb= description_blurb
     return func
 
 def is_callback_setup(func):
-    return hasattr(func, "schema") and hasattr(func, "allowed_sections") and hasattr(func, "has_parameter") and hasattr(func, "cb_key")  and \
+    return hasattr(func, "schema") and hasattr(func, "allowed_purposes") and hasattr(func, "runtime_input_key") and hasattr(func, "cb_key")  and \
             hasattr(func, "allowed_events") and hasattr(func, "allowed_nodes")
 
 class CallbackDatapack():
