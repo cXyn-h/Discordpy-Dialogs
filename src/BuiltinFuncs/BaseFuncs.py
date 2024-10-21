@@ -24,7 +24,7 @@ NODES = [YAML_SELECTION.ACTIVE_NODE, YAML_SELECTION.GOAL_NODE]
 SESSIONS = [YAML_SELECTION.ACTIVE_SESSION, YAML_SELECTION.GOAL_SESSION]
 
 def select_from_pack(name, datapack):
-    '''uses the vlues of YAML_SELECTION to decide which node, session, section data etc from the datapack to return.
+    '''uses the values of YAML_SELECTION to decide which node, session, section data etc from the datapack to return.
     
     Return
     ----

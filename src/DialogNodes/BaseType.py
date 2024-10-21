@@ -156,7 +156,6 @@ properties:
                                                   type: number
                                                   minimum: -1
                                               additionalProperties: False
-                                required: [node_names]
                       unevaluatedProperties: false
         unevaluatedProperties: false
     TTL:

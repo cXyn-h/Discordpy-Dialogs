@@ -54,13 +54,11 @@ exec_log.setLevel(logging.DEBUG)
 #TODO: sessions making sure they work as intended
 #TODO: create modal support
 #TODO: saving and loading active nodes
-#TODO: maybe transition callback functions have a transition info paramter?
 #TODO: Templating yaml?
 #TODO: go through code fine sweep for anything that could be changing data meant to be read
 #TODO: during transition order is to section session which closes node which has only one set way to close every time then does transition callbacks.
 #       This causes a flickering of buttons on discord menu message. Can I get that to not happen somehow? Can i get more info to close node so it can pass it to callbacks about why it's called?
 #       tho at least close_node knowing why it was calle would be good for debugging
-#TODO: make callback permitted purposes more precise
 
 # Thoughts:
 #   sapwning multiple active nodes of same graph node, transitions assume different graph nodes
@@ -94,13 +92,14 @@ class RunNodeEventOutput:
 
 class DialogHandler():
     NON_BROADCAST_EVENTS = ["timeout", "node_error", "node_warning"]
+    '''event names that will never be used as a broadcast. only ever sent to subset of node(s)'''
     def __init__(self, graph_nodes:"typing.Optional[dict[str, BaseType.BaseGraphNode]]"=None, functions=None, settings:HandlerSettings=None, pass_to_callbacks=None, **kwargs) -> None:
         dev_log.info(f"dialog handler being initialized, id is <{id(self)}>")
         self.graph_node_indexer = Cache.MultiIndexer(
                 cache=graph_nodes,
                 input_secondary_indices=[
-                    Cache.FieldValueIndex("type", keys_value_finder=lambda x: [x.TYPE]),
-                    Cache.FieldValueIndex("functions", keys_value_finder=lambda x: [x.TYPE]) #TODO: this doesn't work as intended, fix once I figure out functions
+                    Cache.FieldValueIndex("type", keys_value_finder=lambda node: [node.TYPE]),
+                    Cache.FieldValueIndex("functions", keys_value_finder=lambda node: node.indexer(["functions"])[1])
                 ]
         )
         '''maps the string node id from yaml to graph node object.'''
@@ -108,7 +107,7 @@ class DialogHandler():
         dev_log.debug(f"loaded nodes' names are {self.graph_node_indexer.cache.keys()}")
 
         self.functions_cache = Cache.MultiIndexer(cache=functions, input_secondary_indices=[
-                Cache.FieldValueIndex("sections", keys_value_finder=lambda x: x["permitted_purposes"])
+                Cache.FieldValueIndex("permitted_purposes", keys_value_finder=lambda function: function["permitted_purposes"])
             ]
         )
         '''store of functions this handler is allowed to call. other handlers linking to same list is ok and on dev to handle.
@@ -166,19 +165,36 @@ class DialogHandler():
         '''clear out current graph nodes and replace with nodes in the passed in files. Raises error if nodes have double definitions in listed files
           or graph node definition badly formatted.'''
         #TODO: second pass ok and debug running
-        self.graph_node_indexer.clear()
-        self.graph_node_validation_status.clear()
-        nodeParser.parse_files(*file_names, existing_nodes=self.graph_node_indexer.cache)
+        # self.graph_node_indexer.clear()
+        # self.graph_node_validation_status.clear()
+        # nodeParser.parse_files(*file_names, existing_nodes=self.graph_node_indexer.cache)
+
+        # v3.8.0 testing support for reloading graph nodes, feel like already covered by add_files
+        self.add_files(file_names, overwrites_ok=True)
 
     def add_graph_nodes(self, node_list:"dict[str, BaseType.BaseGraphNode]"={}, overwrites_ok=False):
-        '''add all nodes in list into handler. gives a warning on duplicates
+        '''add all nodes in list into handler. all nodes in list must be separate copies of any already loaded nodes. updates node data if 
+            overwrites are ok, otherwise sends warning
          dev note: assumed handler is now responsible for the objects passed in'''
         #TODO: second pass ok and debug running
         for node_id, node in node_list.items():
             if node.id in self.graph_node_indexer:
                 if overwrites_ok:
+                    # make sure to update existing active nodes. since active node has direct reference to the graph node
+                    #           need to be sure to update them to the right object.
+                    active_of_node_list = self.active_node_cache.get_keys(node.id, index_name="graph_node", default=[])
+                    if len(active_of_node_list) > 0:
+                        for active_node_key in active_of_node_list:
+                            active_node = self.active_node_cache.get_ref(active_node_key, default=None)
+                            if active_node is None:
+                                # assuming because for some reason (probs only in multithreading) this is at some point between retrieval and processing it disappeared
+                                continue
+                            prev_keys = self.active_node_cache.get_all_secondary_keys(self.get_active_node_key(active_node))
+                            active_node.graph_node = node
+                            self.active_node_cache.set_item(self.get_active_node_key(active_node), active_node, prev_keys)
+                    exec_log.info(f"updated node {node.id}")
+                    self.graph_node_indexer.set_item(node.id, node)
                     self.graph_node_validation_status.remove_item(node_id)
-                    self.graph_node_indexer.add_item(node_id, node)
                 else:
                     # possible exception, want to have setting for whether or not it gets thrown
                     exec_log.warning(f"tried adding <{node.id}>, but is duplicate. ignoring it.")
@@ -193,11 +209,10 @@ class DialogHandler():
         self.add_graph_nodes(extras_from_files, overwrites_ok=overwrites_ok)
 
     def reload_files(self, file_names:"list[str]"=[]):
-        updated_nodes = nodeParser.parse_files(*file_names, existing_nodes={})
-        for k, node in updated_nodes.items():
-            exec_log.info(f"updated/created node {node.id}")
-            self.graph_node_indexer.set_item(k, node)
-            self.graph_node_validation_status.remove_item(k)
+        '''deprecated
+        ---
+        use `add_files` with overwrites_ok=True'''
+        self.add_files(file_names=file_names, overwrites_ok=True)
 
 
     '''#############################################################################################
@@ -595,7 +610,7 @@ class DialogHandler():
         
         old_node_timeout = copy.deepcopy(active_node.timeout) if active_node.timeout is not None else None
         old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session is not None and active_node.session.timeout is not None else None
-        before_callbacks_keys = self.active_node_cache.get_all_secondary_keys(id(active_node))
+        before_callbacks_keys = self.active_node_cache.get_all_secondary_keys(self.get_active_node_key(active_node))
         # this may error, methods that call this one are responsible for error handling
         control_data = await self._action_list_runner(active_node, event, callbacks, POSSIBLE_PURPOSES.ACTION, control_data=control_data, section_name=section_name)
 
@@ -624,9 +639,9 @@ class DialogHandler():
         - `session_action` what to do with the session when transitioning
         - `session_timeout` if there's an adjustment to session timeout, grabs value from current Active Node
         - `close_flags` if node and/or session should be closed after handling event, value grabbed from yaml'''
-        node_transitions = active_node.graph_node.get_transitions(event_key)
+        node_transition_list = active_node.graph_node.get_transitions(event_key)
         passed_transition = None
-        for transition_ind, transition in enumerate(node_transitions):
+        for transition_ind, transition in enumerate(node_transition_list):
             dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> starting checking transtion number <{transition_ind}>")
             # first update any counts
             yaml_named_counts = BaseType.BaseGraphNode.parse_node_names(transition["node_names"])
@@ -642,6 +657,10 @@ class DialogHandler():
                 if node_name not in self.graph_node_indexer:
                     exec_log.warning(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition <{transition_ind}> transition to <{node_name}> transition won't work, goal node doesn't exist.")
                     del count_results[node_name]
+
+            if len(count_results) < 1:
+                # no next nodes named. transition must go to some node
+                return None
             
             # running filters on this transtition
             # if no filters then, auto true result
@@ -681,11 +700,14 @@ class DialogHandler():
         dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> starting handling transitions")
         passed_transition = self._run_transition_filters_on_node(active_node, event_key, event)
         if passed_transition is None:
+            # no transitions passed, returning to say no changes to nodes
             return {"close_node": False, "close_session": False}
         dev_log.debug(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> transition that passed filters are for nodes <{passed_transition['count']}>, now starting transitions")
         
         session_action = passed_transition["session_action"]
+        '''get string that says what to do to session'''
         session_timeout = passed_transition["session_timeout"]
+        '''get timeout for session'''
 
         section_exceptions = []
         callbacks_list:list[typing.Tuple[BaseType.BaseNode, list, int]] = []
@@ -705,10 +727,13 @@ class DialogHandler():
                 elif session_action in ["chain", "section"] and active_node.session is not None:
                     # regular behavior for chain, select session if it exists
                     # only chain and section need to care about session already existing and changing timeout
+                    # none means no updates. for no timeout, pass in -1
                     if session_timeout is not None:
                         old_session_timeout = copy.deepcopy(active_node.session.timeout) if active_node.session.timeout is not None else None
+                        old_secondary_keys = self.active_node_cache.get_all_secondary_keys(self.get_active_node_key(active_node))
                         active_node.session.set_TTL(timeout_duration=timedelta(seconds=session_timeout))
                         self.update_timeout_tracker(active_node.session, old_session_timeout)
+                        self.active_node_cache.set_item(self.get_active_node_key(active_node), active_node, old_secondary_keys)
                     session = active_node.session
                     dev_log.debug(f"next node starting with current active session. <{self.get_session_key(session)}>")
                 elif session_action != "end":
@@ -716,14 +741,15 @@ class DialogHandler():
                     # end means next node doesn't get current session, all other cases can take current session, though if it was session object it most likely was handled already
                     session = active_node.session
 
+                # must get ref for activate node call, since the active node will get ref to node object
                 next_node = self.graph_node_indexer.get_ref(next_node_name).activate_node(session)
                 if session_action == "section" and session is not None:
                     # not the complete list of all nodes created. might miss sone when ending session, might have extra when starting session but at least covers all that would be in the session about to be sectioned
                     section_exceptions.append(next_node)
-                exec_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> activated next node, <{id(next_node)}><{next_node_name}>, copy <{i}>")
+                exec_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> activated next node, <{self.get_active_node_key(next_node)}><{next_node_name}>, copy <{i}>")
                 if session_action != "end" and session is not None:
                     # only end doesn't want node added to session
-                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> adding next node <{id(next_node)}><{next_node.graph_node.id}> to session <{self.get_session_key(session)}>")
+                    dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> adding next node <{self.get_active_node_key(next_node)}><{next_node.graph_node.id}> to session <{self.get_session_key(session)}>")
                     session.add_node(next_node)
                     dev_log.info(f"handler id'd <{id(self)}> event <{id(event)}><{event_key}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> session debugging, session <{self.get_session_key(session)}>, now has node list is <{[str(self.get_active_node_key(x))+ ' ' +x.graph_node.id for x in session.get_linked_nodes()]}>")
                 callbacks_list.append((next_node, passed_transition["actions"], i))
@@ -758,6 +784,16 @@ class DialogHandler():
     ####                   I-DONT-REALLY-HAVE-A-NAME-BUT-IT-DOESNT-FIT-ELSEWHERE SECTION
     ################################################################################################
     ################################################################################################'''
+
+    def get_display_info(self, detail_level="item_info"):
+        if detail_level == "list_overview":
+            short_blurb = ""
+            short_blurb += "graph nodes: " + str(len(self.graph_node_indexer)) + "\n"
+            short_blurb += "functions: " + str(len(self.functions_cache)) + "\n"
+            short_blurb += "active: " + str(len(self.active_node_cache))
+            return short_blurb
+        if detail_level == "item_info":
+            return "WIP"
 
     async def _track_new_active_node(self, active_node:BaseType.BaseNode, event):
         '''adds the given active node to handler's internal tracking. after this, node is fully considered being managed by this handler.
@@ -858,11 +894,11 @@ class DialogHandler():
     ################################################################################################'''
 
     def generate_action_control_data(self, addons=None):
-        section_data = {"close_node": False, "close_session": False}
+        control_data = {"close_node": False, "close_session": False}
         if addons:
             if isinstance(addons, dict):
-                section_data.update(addons)
-        return section_data
+                control_data.update(addons)
+        return control_data
 
 
     async def _action_list_runner(self, active_node:BaseType.BaseNode, event, action_list, purpose: POSSIBLE_PURPOSES, goal_node=None, control_data=None, section_name="actions"):
@@ -874,23 +910,38 @@ class DialogHandler():
         Return
         ---
         `dict` the control data changed by callbacks. currently holds `close_node` and `close_session`, both default to False. cleans up changes due to callbacks'''
-        final_control_data = control_data
-        control_keys = final_control_data.keys()
         if control_data is None:
-            # object meant for temp just passing data to rest of functions in this section.
+            # setup structure of system logic flow settings that can be changed by functions
             control_data = self.generate_action_control_data()
         else:
+            # used passed in control data, adding in anything missing from base. should be a complete copy that doesn't have anything missing
+            _temp_control_base = self.generate_action_control_data()
             control_data = copy.deepcopy(control_data)
+            for key in _temp_control_base:
+                if key not in control_data:
+                    control_data[key] = _temp_control_base[key]
+        control_keys = control_data.keys()
+        '''base set of keys this call to _action_list_runner control_data has'''
         section_data = {}
         async def recur_list_helper(func_sub_list):
             nonlocal control_data
             nonlocal section_data
-            nonlocal final_control_data
+            nonlocal control_keys
             for callback in func_sub_list:
+                # get a copy for each loop to prevent errors from building up over callbacks
+                loop_control_copy = copy.deepcopy(control_data)
                 dev_log.debug(f"callback is {callback}, data {section_data}")
                 if isinstance(callback, str):
                     # is just function name, no parameters
-                    await self._run_func_async(callback, purpose, active_node, event, goal_node=goal_node, callb_section_data=section_data, control_data=control_data, section_name=section_name)
+                    await self._run_func_async(
+                            callback,
+                            purpose,
+                            active_node,
+                            event,
+                            goal_node=goal_node,
+                            callb_section_data=section_data,
+                            control_data=loop_control_copy,
+                            section_name=section_name)
                 elif isinstance(callback, SectionUtils.IfSubSection):
                     filter_res = self._filter_list_runner(active_node=active_node, event=event, filter_list=callback.filters, purpose=POSSIBLE_PURPOSES.FILTER, section_data=section_data)
                     if filter_res:
@@ -898,17 +949,26 @@ class DialogHandler():
                 else:
                     key = list(callback.keys())[0]
                     value = callback[key]
-                    await self._run_func_async(key, purpose, active_node, event, goal_node=goal_node, base_parameter=value, callb_section_data=section_data, control_data=control_data, section_name=section_name)
-                cleaned_control_data = {}
+                    await self._run_func_async(
+                            key,
+                            purpose,
+                            active_node,
+                            event,
+                            goal_node=goal_node,
+                            base_parameter=value,
+                            callb_section_data=section_data,
+                            control_data=loop_control_copy,
+                            section_name=section_name)
+                # cleanup control data to save and prepare for next round
                 for key in control_keys:
-                    if key in control_data:
-                        cleaned_control_data[key] = control_data[key]
-                        final_control_data[key] = control_data[key]
-                control_data = cleaned_control_data
+                    if key in loop_control_copy:
+                        control_data[key] = loop_control_copy[key]
         await recur_list_helper(action_list)
-        return final_control_data
+        return control_data
     
     def _counter_runner(self, yaml_count, active_node:BaseType.BaseNode, event, action_list, purpose:POSSIBLE_PURPOSES):
+        # control data is the count of nodes to transition to. not treating it like action section control data because
+        #       it is ok to delete things from count.
         section_data = {}
         for callback in action_list:
             if isinstance(callback, str):
@@ -940,7 +1000,7 @@ class DialogHandler():
         ---
         'boolean' - if active node and event situation passes custom filter list'''
         if section_data is None:
-            # object meant for temp just passing datat to rest of functions in this section.
+            # object meant for temp just passing data to rest of functions in this section.
             section_data = {}
         section_name = "filters" if purpose.value == POSSIBLE_PURPOSES.FILTER else "transition_filters"
         #TODO: figure out section progress data structure
