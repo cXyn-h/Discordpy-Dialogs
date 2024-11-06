@@ -1098,11 +1098,11 @@ class DialogHandler():
     
     def get_active_node_key(self, active_node): #TODO: double check all accessors have been converted to this function
         '''wrapper for how the system determines for ids of active nodes. Just to make sure it is consistent across the handler'''
-        return id(active_node)
+        return active_node.id
     
     def get_session_key(self, session):
         '''wrapper for how the system determines for ids of sessions. Just to make sure it is consistent across the handler'''
-        return id(session)
+        return session.id
 
     '''#############################################################################################
     ################################################################################################

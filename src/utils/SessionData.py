@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
 import typing
+import uuid
 import src.DialogNodes.BaseType as BaseType
 from src.utils.Enums import ITEM_STATUS
 
 class SessionData:
     DEFAULT_TTL = 600
     def __init__(self, timeout_duration=None) -> None:
+        self.id = uuid.uuid4().hex
         self.linked_nodes:list[BaseType.BaseNode] = []
         timeout_duration = timeout_duration if timeout_duration is not None else timedelta(seconds=SessionData.DEFAULT_TTL)
         self.set_TTL(timeout_duration)
