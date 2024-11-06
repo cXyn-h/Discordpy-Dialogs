@@ -5,6 +5,8 @@ import typing
 import src.utils.SessionData as SessionData
 import yaml
 import copy
+import uuid
+
 from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
 
 import src.utils.Cache as Cache
@@ -774,6 +776,7 @@ required: ["id"]
 
 class BaseNode:
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
+        self.id = uuid.uuid4().hex
         self.graph_node = graph_node
         self.session = session
         self.status = ITEM_STATUS.INACTIVE
