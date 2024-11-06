@@ -129,7 +129,7 @@ class DialogHandler():
                 Cache.FieldValueIndex("task_type", keys_value_finder=lambda x: [x.type]),
                 Cache.FieldValueIndex("session_id", keys_value_finder=lambda x: [self.get_session_key(x.session)] if x.type == "SessionEventTask" else []),
                 Cache.FieldValueIndex("node_id", keys_value_finder=lambda x: [self.get_active_node_key(x.active_node)] if x.type == "NodeEventTask" else []),
-                Cache.FieldValueIndex("session_waiters", keys_value_finder=lambda x: [self.get_session_key(x.timeoutable)] if x.type == "TimeoutWaiter" and not issubclass(x.timeoutable.__class__, BaseType.BaseNode) else []),
+                Cache.FieldValueIndex("session_waiters", keys_value_finder=lambda x: [self.get_session_key(x.timeoutable)] if x.type == "TimeoutWaiter" and isinstance(x.timeoutable, SessionData.SessionData) else []),
                 Cache.FieldValueIndex("node_waiters", keys_value_finder=lambda x: [self.get_active_node_key(x.timeoutable)] if x.type == "TimeoutWaiter" and issubclass(x.timeoutable.__class__, BaseType.BaseNode) else []),
                 Cache.FieldValueIndex("session_timeouts", keys_value_finder=lambda x: [self.get_session_key(x.timeoutable)] if x.type == "SessionTimeoutTask" else []),
                 Cache.FieldValueIndex("node_timeouts", keys_value_finder=lambda x: [self.get_active_node_key(x.timeoutable)] if x.type == "NodeTimeoutTask" else [])
@@ -1102,17 +1102,25 @@ class DialogHandler():
     ####                                       TASK MANGEMENT SECTION
     ################################################################################################
     ################################################################################################'''
+
+    def _remove_task_tracking(self, task_id):
+        '''remove task tracking from handler and do any cleanup needed'''
+        removed_task:HandlerTasks.HandlerTask = self.advanced_event_queue.remove_item(task_id)
+        if removed_task is not None:
+            # break any potential circular references. should not happen when using pattern of events in tracking is only previous scheduled tasks
+            removed_task.locking_tasks.clear()
+
     def _filter_active_tasks(self, task_list:'list[HandlerTasks.HandlerTask]'):
-        '''extra cleaning of old tasks that should be removed. main benefit is just makes lists shorter'''
+        '''cache cannot index using wether or not task completed. filter out anything that has completed and clean up anything that should
+        be cleared out of tracking'''
         filtered_list = []
         for task in task_list:
             dev_log.debug(f"checking up on task <{id(task)}>, done? <{task.done()}> exception <{task.exception() if task.done() else 'not done'}>")
-            if task.stop_time is not None and task.stop_time + self.settings.task_age < datetime.utcnow():
-                self.advanced_event_queue.remove_item(id(task))
-                # break any potential circular references. should not happen when using pattern of events in tracking is only previous scheduled tasks
-                task.locking_tasks.clear()
-                continue
-            filtered_list.append(task)
+            if task.stop_time is None:
+                # if stop time is filled, task is done. only return not dones
+                filtered_list.append(task)
+            elif task.stop_time + self.settings.task_age < datetime.utcnow():
+                self._remove_task_tracking(id(task))
         return filtered_list
 
     def _create_handle_event_task(self, event_type, event):
@@ -1134,13 +1142,20 @@ class DialogHandler():
         # don't use gather here, think it batches it so all nodes responding to event have to pass callbacks before any one of them go on to transitions
         # each node is mostly independent of others for each event and don't want them to wait for another node to finish
         
-        session_tasks = {}
+        session_tasks, node_tasks = self.gather_event_tasks(event, event_type, waiting_period_sec=waiting_period_sec, waiting_node_keys=waiting_node_keys)
+
+        notify_results = await asyncio.gather(*[*node_tasks, *session_tasks.values()])
+        dev_log.debug(f"handler id'd <{id(self)}>, event <{id(event)}> end of handle_event results are <{notify_results}>")
+
+    def gather_event_tasks(self, event, event_type, waiting_period_sec, waiting_node_keys):
+        session_tasks:dict[str, HandlerTasks.HandleSessionEventTask] = {}
         '''track sessions that are involved for the nodes we are trying to run on'''
         node_tasks = []
         '''tasks for all nodes to run on'''
 
         # new event needs to be scheduled for all nodes that are waiting for it
         # either at same time as previous events or after, is a setting
+        # for a event running on node, needs to wait until previous event
         # for a event running on node, needs to wait until previous events on session and node are done
         for node_key in waiting_node_keys:
             node_locking_tasks = []
@@ -1150,8 +1165,11 @@ class DialogHandler():
                 # find if there's any previous events still being processed for the session
                 found_session_tasks = self.advanced_event_queue.get(self.get_session_key(node.session), index_name="session_id", default=[])
                 found_session_tasks = self._filter_active_tasks(found_session_tasks)
+                # event ordering constraints mean new event tasks must wait for all previous. 
+                # including new node tasks for previous event session tasks
                 node_locking_tasks.extend(found_session_tasks)
                 session_locking_tasks.extend(found_session_tasks)
+                # timeout tasks also require working on node so should lock for those
                 found_session_timeouts = self.advanced_event_queue.get(self.get_session_key(node.session), index_name="session_timeouts",default=[])
                 found_session_timeouts = self._filter_active_tasks(found_session_timeouts)
                 node_locking_tasks.extend(found_session_timeouts)
@@ -1180,9 +1198,7 @@ class DialogHandler():
         for task in session_tasks.values():
             task.set_node_tasks(node_tasks)
             self.advanced_event_queue.add_item(id(task), task)
-
-        notify_results = await asyncio.gather(*[*node_tasks, *session_tasks.values()])
-        dev_log.debug(f"handler id'd <{id(self)}>, event <{id(event)}> end of handle_event results are <{notify_results}>")
+        return session_tasks, node_tasks
 
     async def session_event_task(self, session, event_type, event, node_tasks):
         dev_log.debug(f"handler id'd <{id(self)}>, handling event <{id(event)}><{event_type}> for session <{self.get_active_node_key(session)}> starting session task, waiting on <{[id(task) for task in node_tasks]}>")
@@ -1199,6 +1215,7 @@ class DialogHandler():
             await self.close_session(session)
 
     async def wait_timeout(self, timeoutable, waiting_seconds):
+        '''tracker task for every session or node that can timeout. ensure only one task per timeoutable max'''
         task = asyncio.current_task()
         if issubclass(timeoutable.__class__, BaseType.BaseNode):
             type = "Node"
@@ -1207,89 +1224,82 @@ class DialogHandler():
         else:
             return
         
-        # big outer loop for repeating waiting for timeout, then when it hits run timeout callbacks. just has the regular conditions
-        #   for not needing to check timeouts anymore: doesn't timeout or timeout has passed
-        while timeoutable.timeout is not None and datetime.utcnow() <= timeoutable.timeout:
-            # the keep checking loop
+        # big outer loop for repeating waiting for timeout, then when it reaches zero, run timeout callbacks. 
+        #   has conditions for never needing to run timeout handling or checking: no timeout set or closed node
+        #   not using timeout passed for conditions in case this task started after timeout was set because it was set to be veerrrrryyy soon
+        while timeoutable.timeout is not None and timeoutable.is_active():
+            # the wait and keep checking loop
             while datetime.utcnow() < timeoutable.timeout:
                 task.status = TASK_STATE.WAITING
                 # try to sleep at most the given waiting_seconds just so is somewhat active and can respond to cancels or changes
                 delay = min(max(0, (timeoutable.timeout - datetime.utcnow()).total_seconds()), waiting_seconds)
                 dev_log.debug(f"handler id'd <{id(self)}> waiting for a timeout for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. sleeping for <{delay}>")
                 await asyncio.sleep(delay)
-                if timeoutable.status == ITEM_STATUS.CLOSED or timeoutable.timeout is None:
+                if not timeoutable.is_active() or timeoutable.timeout is None:
                     dev_log.debug(f"handler id'd <{id(self)}> after waiting for a timeout for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. found it is closed or timeout disabled")
                     # if timeout was stopped or node already closed, don't need to continue checking and running
                     return
+            # woken up, timeout is now. already filtered out cases where already closed or otherwise invalid
+            # check to make sure current running task is main task
+            if id(task) not in self.advanced_event_queue:
+                return
             task.status = TASK_STATE.EVENT
-            existing_event_tasks = []
-            if not self.settings.timeout_cut and self.settings.strict_event_order:
-                existing_event_tasks:list[HandlerTasks.HandlerTask] = self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])
+
+            existing_event_tasks:list[HandlerTasks.HandlerTask] = []
+            if self.settings.strict_event_order:
+                # events must happen in order they came so wait on all timeouts as well
+                existing_event_tasks = self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])
                 existing_event_tasks = self._filter_active_tasks(existing_event_tasks)
-            timeout_handler_task = HandlerTasks.HandleTimeoutTask(self.handle_timeout, timeoutable=timeoutable, type=type, locking_tasks=existing_event_tasks, waiting_period_sec=waiting_seconds)
+                timeout_events = self.advanced_event_queue.get("SessionTimeoutTask", index_name="task_type", default=[])
+                timeout_events = self._filter_active_tasks(timeout_events)
+                existing_event_tasks.extend(timeout_events)
+                timeout_events = self.advanced_event_queue.get("NodeTimeoutTask", index_name="task_type", default=[])
+                timeout_events = self._filter_active_tasks(timeout_events)
+                existing_event_tasks.extend(timeout_events)
+            if type == "Node" and len(self._filter_active_tasks(self.advanced_event_queue.get(self.get_active_node_key(timeoutable), index_name="NodeTimeoutTask", default = []))) > 0:
+                dev_log.error(f"TIMEOUT WAITER FOUND THERE'S ANOTHER TASK HANDLING TIMEOUT. LIKELY SOMETHING VERY WRONG THERE'S TWO TASKS WAITING ON SAME THING")
+            if type == "Session" and len(self._filter_active_tasks(self.advanced_event_queue.get(self.get_session_key(timeoutable), index_name="SessionTimeoutTask", default = []))) > 0:
+                dev_log.error(f"TIMEOUT WAITER FOUND THERE'S ANOTHER TASK HANDLING TIMEOUT. LIKELY SOMETHING VERY WRONG THERE'S TWO TASKS WAITING ON SAME THING")
+            timeout_handler_task = HandlerTasks.HandleTimeoutTask(
+                self.handle_timeout,
+                timeoutable=timeoutable,
+                type=type,
+                locking_tasks=existing_event_tasks,
+                waiting_period_sec=waiting_seconds
+            )
             dev_log.debug(f"handler id'd <{id(self)}> timeout waiter for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. timeout handler task <{id(timeout_handler_task)}> locking tasks found to be <{[id(task) for task in existing_event_tasks]}>")
             self.advanced_event_queue.add_item(id(timeout_handler_task), timeout_handler_task)
             dev_log.debug(f"task queue size <{len(self.advanced_event_queue)}>")
             await timeout_handler_task
             if timeoutable.status == ITEM_STATUS.CLOSED:
                 return
+            if timeoutable.timeout is not None and datetime.utcnow() > timeoutable.timeout:
+                # if actual timeout set and has passed
+                return
 
     async def handle_timeout(self, timeoutable:typing.Union[BaseType.BaseNode, SessionData.SessionData], waiting_seconds):
-        event = {}
+        if not timeoutable.is_active():
+            # don't run timeout if it's already closed. this is just for double checking.
+            return
         if issubclass(timeoutable.__class__, BaseType.BaseNode):
             type = "Node"
-            session = timeoutable.session
-            nodes = [timeoutable]
+            nodes = [self.get_active_node_key(timeoutable)]
         elif isinstance(timeoutable, SessionData.SessionData):
             type = "Session"
-            session = timeoutable
-            nodes = [*timeoutable.linked_nodes]
+            nodes = [self.get_active_node_key(node) for node in timeoutable.linked_nodes]
+        event = {"type": type, "original_timeout": timeoutable.timeout}
+        #TODO: timeout handler when object is wrong type?
         dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. started")
 
-        # session may be none because node doesn't have a session.
-        # there is at max one session
+        # there is at max one session, may be none because node doesn't have a session.
+        # session represents what session needs to handle timeout event potentially having close session flag
         # nodes are either one or all of the same session
+        # these are the nodes that have to run the timeout event
 
-        session_task = None
-        node_tasks = []
-        '''tasks for all nodes to run on'''
+        session_tasks, node_tasks = self.gather_event_tasks(event, 'timeout', waiting_period_sec=waiting_seconds, waiting_node_keys=nodes)
+        final_await_list = [*node_tasks, *session_tasks.values()]
 
-        session_locking_tasks = []
-        if session is not None:
-            found_session_tasks = self.advanced_event_queue.get(self.get_session_key(session), index_name="session_id", default=[])
-            found_session_tasks = self._filter_active_tasks(found_session_tasks)
-            session_locking_tasks.extend(found_session_tasks)
-            session_task = HandlerTasks.HandleSessionEventTask(self.session_event_task, session=session, event=event, event_type="timeout", locking_tasks=session_locking_tasks, waiting_period_sec=waiting_seconds)
-            dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. created session task <{id(session_task)}> for session <{self.get_session_key(session)}>, locking tasks are <{[id(task) for task in session_locking_tasks]}>")
-
-        # new event needs to be scheduled for all nodes that are waiting for it
-        # either at same time as previous events or after, is a setting
-        # for a event running on node, needs to wait until previous events on session and node are done
-        for node in nodes:
-            node_locking_tasks = []
-            if session is not None:
-                # find if there's any previous events still being processed for the session
-                node_locking_tasks.extend(found_session_tasks)
-            # find if any previous events still being processed for the node
-            found_node_tasks = self.advanced_event_queue.get(self.get_active_node_key(node), index_name="node_id", default=[])
-            found_node_tasks = self._filter_active_tasks(found_node_tasks)
-            node_locking_tasks.extend(found_node_tasks)
-
-            node_task = HandlerTasks.HandleNodeEventTask(self._run_event_on_node, active_node=node, event=event, event_type="timeout", locking_tasks=node_locking_tasks, waiting_period_sec=waiting_seconds)
-            dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. created node task <{id(node_task)}> for node <{self.get_active_node_key(node)}>, locking tasks are <{[id(task) for task in node_locking_tasks]}>")
-            node_tasks.append(node_task)
-        dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. adding tasks to tracking")
-        # only add the current event tasks to tracking after processing so can't accidentally wait on task from this round
-        final_await_list = []
-        for task in node_tasks:
-            final_await_list.append(task)
-            self.advanced_event_queue.add_item(id(task), task)
-        if session_task:
-            session_task.set_node_tasks(node_tasks)
-            self.advanced_event_queue.add_item(id(session_task), session_task)
-            final_await_list.append(session_task)
-        dev_log.debug(f"task queue size <{len(self.advanced_event_queue)}>")
-        dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. tasks for timeout are <{[id(task) for task in node_tasks]}>")
+        # await all event handling to finish before continuing timeout handling
         await asyncio.gather(*final_await_list)
         if timeoutable.timeout is not None and timeoutable.timeout <= datetime.utcnow():
             dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. found timeout gone, need to close")
@@ -1319,7 +1329,7 @@ class DialogHandler():
             fetched_list = self.advanced_event_queue.get_keys(self.get_session_key(timeoutable), index_name="session_waiters", default=[])
         filtered_list = []
         for timeout_waiter_key in fetched_list:
-            timeout_waiter = self.advanced_event_queue.get_ref(timeout_waiter_key)
+            timeout_waiter:HandlerTasks.HandlerTask = self.advanced_event_queue.get_ref(timeout_waiter_key)
             if not timeout_waiter.done():
                 filtered_list.append(timeout_waiter)
         return filtered_list
