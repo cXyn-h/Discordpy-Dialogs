@@ -360,6 +360,13 @@ def has_data(data:cbUtils.CallbackDatapack):
             return split_grab[-1] in obj
     return False
 
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
+def did_session_timeout(data:cbUtils.CallbackDatapack):
+    return isinstance(data.event, dict) and "type" in data.event and data.event["type"] == "Session"
+
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
+def did_node_timeout(data:cbUtils.CallbackDatapack):
+    return isinstance(data.event, dict) and "type" in data.event and data.event["type"] == "Node"
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], description_blurb="always says False")
 def always_false_filter(data:cbUtils.CallbackDatapack):
@@ -371,5 +378,5 @@ def always_true_filter(data:cbUtils.CallbackDatapack):
 
 dialog_func_info = {transfer_data:{}, always_false_filter:{}, always_true_filter:{},
                     save_data:{}, random_chance:{}, simple_compare:{}, increment_value:{}, update_timeout:{},
-                    call_on_object:{}, delete_data:{}, has_data:{}}
+                    call_on_object:{}, delete_data:{}, has_data:{}, did_session_timeout:{}}
 
