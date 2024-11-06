@@ -369,11 +369,7 @@ def always_false_filter(data:cbUtils.CallbackDatapack):
 def always_true_filter(data:cbUtils.CallbackDatapack):
     return True
 
-@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], description_blurb="internally acknowledge something happened")
-def debugging_action(data:cbUtils.CallbackDatapack):
-    print(f"DEBUGGING ACTION!! For node <{id(data.active_node)}><{data.active_node.graph_node.id}> event <{id(data.event)}><{type(data.event)}>")
-
-dialog_func_info = {transfer_data:{}, always_false_filter:{}, always_true_filter:{}, debugging_action:{},
+dialog_func_info = {transfer_data:{}, always_false_filter:{}, always_true_filter:{},
                     save_data:{}, random_chance:{}, simple_compare:{}, increment_value:{}, update_timeout:{},
                     call_on_object:{}, delete_data:{}, has_data:{}}
 
