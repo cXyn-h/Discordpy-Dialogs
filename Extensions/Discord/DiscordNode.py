@@ -88,6 +88,23 @@ class DiscordNode(BaseNode):
                 return message_info
         return None
 
+    def serialize(self):
+        serialized = super().serialize()
+        serialized.update({"encoding_version": "0.1", "menu_messages_info":{}, "managed_replies_info":[]})
+        for menu_message, message_info in self.menu_messages_info.items():
+            serialized["menu_messages_info"][menu_message] = message_info.serialize()
+        for message_info in self.managed_replies_info:
+            serialized["managed_replies_info"].append(message_info.serialize())
+        return serialized
+    
+    def can_set(self, location):
+        superclass_decision = super().can_set(location)
+        if isinstance(location, str):
+            split_names = location.split(".")
+        elif isinstance(location, list):
+            split_names = location
+        return superclass_decision and split_names[0] not in ["menu_messages_info", "managed_replies_info"]
+
     def close(self):
         super().close()
         for message_info in self.menu_messages_info.values():

@@ -197,15 +197,15 @@ def parse_file(file_name, existing_nodes:dict=None, allowed_types:"dict[str,type
     # don't want truthy comparison so user can pass in a dict object they want filled
     existing_nodes = existing_nodes if existing_nodes is not None else {}
     with open(file_name) as file:
-        parse_contents(file, file_name, existing_nodes=existing_nodes, allowed_types=allowed_types)
+        doc_dict = yaml.safe_load_all(file)
+        parse_contents(doc_dict, file_name, existing_nodes=existing_nodes, allowed_types=allowed_types)
     parsing_logger.info(f"finished loading file <{file_name}>")
     return existing_nodes
 
-def parse_contents(content_string, file_location = "", existing_nodes:dict=None, allowed_types:"dict[str,types.ModuleType]"=ALLOWED_NODE_TYPES):
+def parse_contents(doc_dict, file_location = "", existing_nodes:dict=None, allowed_types:"dict[str,types.ModuleType]"=ALLOWED_NODE_TYPES):
     existing_nodes = existing_nodes if existing_nodes is not None else {}
     file_location = 'file: ' + file_location if file_location else 'string'
     parsing_logger.debug(f"loading content from <{file_location}>, with existing nodes <{existing_nodes}>")
-    doc_dict = yaml.safe_load_all(content_string)
     for doc_ind, yaml_doc in enumerate(doc_dict):
         parsing_logger.debug(f"parsing document indexed <{doc_ind}> from <{file_location}>")
         if yaml_doc is None or "nodes" not in yaml_doc or yaml_doc["nodes"] is None or len(yaml_doc["nodes"]) == 0:
