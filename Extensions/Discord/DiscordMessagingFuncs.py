@@ -527,21 +527,11 @@ def is_allowed_user(data:cbUtils.CallbackDatapack):
 
     allowed_set = set()
     for target in targets:
-        location = NodetionBaseFuncs.select_from_pack(target, data)
-        if location is None:
-            continue
-        discord_logger.debug(f"target {target} mapped to location in data, {location}")
-        if issubclass(location.__class__, BaseType.BaseNode):
-            discord_logger.debug(f"dfsaf, {vars(location)}")
-            if hasattr(location, "allowed_users"):
-                discord_logger.debug(f"checking allowed users, combining allowed from {target}")
-                for user_id in location.allowed_users:
-                    allowed_set.add(user_id)
-        elif isinstance(location, dict):
-            if "allowed_users" in location:
-                discord_logger.debug(f"checking allowed users, combining allowed from {target}")
-                for user_id in location["allowed_users"]:
-                    allowed_set.add(user_id)
+        discord_logger.debug(f"checking allowed users, combining allowed from {target}")
+        allowed_user_list = NodetionBaseFuncs.get_data(data, target + ".allowed_users", default=[])
+        for user_id in allowed_user_list:
+            allowed_set.add(user_id)
+
     discord_logger.debug(f"is allowed finished checks, result {user.id in allowed_set}")
     return user.id in allowed_set
 
@@ -576,20 +566,14 @@ def mark_allowed_user(data:cbUtils.CallbackDatapack):
         raise Exception(f"wrong event types called mark_allowed_user. got {event}, expected discord interaction or message")
 
     for save_location in targets:
-        location = NodetionBaseFuncs.select_from_pack(save_location, data)
+        location = NodetionBaseFuncs.get_data(data, save_location, None)
         if location is None:
             continue
-
-        if issubclass(location.__class__, BaseType.BaseNode):
-            discord_logger.debug(f"marking allowed user {user.id} in {save_location}")
-            if not hasattr(location, "allowed_users"):
-                setattr(location, "allowed_users", set())
-            location.allowed_users.add(user.id)
-        elif isinstance(location, dict):
-            discord_logger.debug(f"marking allowed user {user.id} in {save_location}")
-            if "allowed_users" not in location:
-                location["allowed_users"] = set()
-            location["allowed_users"].add(user.id)
+        user_list = NodetionBaseFuncs.get_data(data, save_location+".allowed_users", None)
+        if user_list is None:
+            NodetionBaseFuncs.handle_save_ref(set(), save_location+".allowed_users", data)
+            user_list = NodetionBaseFuncs.get_data(data, save_location+".allowed_users", None)
+        user_list.add(user.id)
 
 @cbUtils.callback_settings(runtime_input_key="is_reply_override", allowed_purposes=[POSSIBLE_PURPOSES.FILTER], schema={
     "oneOf": [
