@@ -1104,11 +1104,42 @@ class DialogHandler():
         '''wrapper for how the system determines for ids of sessions. Just to make sure it is consistent across the handler'''
         return session.id
 
+    def snapshot_state(self):
+        try:
+            state = {}
+            state["active_nodes"] = {}
+            for node_id, node in self.active_node_cache.cache.items():
+                state["active_nodes"][node_id] = node.serialize()
+            
+            state["sessions"] = {}
+            for node_key in self.active_node_cache.get_keys("does", index_name="has_session", default=[]):
+                node:BaseType.BaseNode = self.active_node_cache.get_ref(node_key)
+                if node.session.id in state["sessions"]:
+                    pass
+                state["sessions"][node.session.id] = node.session.serialize()
+            
+            return state
+            #TODO: saving full state info
+        except Exception as e:
+            dev_log.error(f"error saving, {e}")
+
     '''#############################################################################################
     ################################################################################################
     ####                                       TASK MANGEMENT SECTION
     ################################################################################################
     ################################################################################################'''
+
+    def schedule_snapshot(self):
+        event = {}
+        event_type = "save_state"
+        dev_log.info(f"handler id'd <{id(self)}> scheduling save event <{id(event)}><{event_type}> creating task for handling")
+        to_await_event_tasks = []
+        to_await_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])))
+        to_await_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("SystemTask", index_name="task_type", default=[])))
+        task = HandlerTasks.HandlerSystemEventTask(handler_func=self.snapshot_state, event_type=event_type, event=event, locking_tasks=to_await_event_tasks)
+        dev_log.debug(f"task for <{id(event)}><{event_type}> task is <{id(task)}> waiting on other tasks. locking tasks are <{[id(item) for item in to_await_event_tasks]}>")
+        self.advanced_event_queue.add_item(id(task), task)
+        return task
 
     def _remove_task_tracking(self, task_id):
         '''remove task tracking from handler and do any cleanup needed'''
@@ -1134,11 +1165,10 @@ class DialogHandler():
 
     def _create_handle_event_task(self, event_type, event):
         dev_log.info(f"handler id'd <{id(self)}> has been notified of event happening. event <{id(event)}><{event_type}> oject type <{type(event)}>, creating task for handling")
-        to_await_event_tasks = []
-        existing_event_tasks:list[HandlerTasks.HandlerTask] = self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])
-        existing_event_tasks = self._filter_active_tasks(existing_event_tasks)
+        to_await_event_tasks:list[HandlerTasks.HandlerTask] = []
+        to_await_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("SystemTask", index_name="task_type", default=[])))
         if self.settings.strict_event_order:
-            to_await_event_tasks.extend(existing_event_tasks)
+            to_await_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])))
         task = HandlerTasks.HandleEventTask(handler_func=self._handle_event_task, event_type=event_type, event=event, locking_tasks=to_await_event_tasks)
         dev_log.debug(f"task for <{id(event)}><{event_type}> task is <{id(task)}> waiting on other tasks. locking tasks are <{[id(item) for item in to_await_event_tasks]}>")
         self.advanced_event_queue.add_item(id(task), task)
@@ -1255,16 +1285,12 @@ class DialogHandler():
             task.status = TASK_STATE.EVENT
 
             existing_event_tasks:list[HandlerTasks.HandlerTask] = []
+            existing_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("SystemTask", index_name="task_type", default=[])))
             if self.settings.strict_event_order:
                 # events must happen in order they came so wait on all timeouts as well
-                existing_event_tasks = self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])
-                existing_event_tasks = self._filter_active_tasks(existing_event_tasks)
-                timeout_events = self.advanced_event_queue.get("SessionTimeoutTask", index_name="task_type", default=[])
-                timeout_events = self._filter_active_tasks(timeout_events)
-                existing_event_tasks.extend(timeout_events)
-                timeout_events = self.advanced_event_queue.get("NodeTimeoutTask", index_name="task_type", default=[])
-                timeout_events = self._filter_active_tasks(timeout_events)
-                existing_event_tasks.extend(timeout_events)
+                existing_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("EventTask", index_name="task_type", default=[])))
+                existing_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("SessionTimeoutTask", index_name="task_type", default=[])))
+                existing_event_tasks.extend(self._filter_active_tasks(self.advanced_event_queue.get("NodeTimeoutTask", index_name="task_type", default=[])))
             if type == "Node" and len(self._filter_active_tasks(self.advanced_event_queue.get(self.get_active_node_key(timeoutable), index_name="NodeTimeoutTask", default = []))) > 0:
                 dev_log.error(f"TIMEOUT WAITER FOUND THERE'S ANOTHER TASK HANDLING TIMEOUT. LIKELY SOMETHING VERY WRONG THERE'S TWO TASKS WAITING ON SAME THING")
             if type == "Session" and len(self._filter_active_tasks(self.advanced_event_queue.get(self.get_session_key(timeoutable), index_name="SessionTimeoutTask", default = []))) > 0:
