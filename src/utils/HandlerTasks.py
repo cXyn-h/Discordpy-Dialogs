@@ -53,6 +53,14 @@ class HandleEventTask(HandlerTask):
 
     async def do_task(self):
         return await self.handler_func(self.event_type, self.event, self.waiting_period_sec)
+    
+class HandlerSystemEventTask(HandleEventTask):
+    def __init__(self, handler_func, event_type, event, loop: AbstractEventLoop = None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+        super().__init__(handler_func, event_type, event, loop, name, locking_tasks, waiting_period_sec)
+        self.type = "SystemTask"
+
+    async def do_task(self):
+        return await self.handler_func()
 
 class HandleSessionEventTask(HandlerTask):
     def __init__(self, handler_func, session, event_type, event, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
