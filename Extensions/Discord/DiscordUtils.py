@@ -12,6 +12,9 @@ class NodetionDCMenuInfo:
         # page is not in default discord message. This is tracking from
         # Nodetion itself for data that can't fit in a single discord message.
 
+    def serialize(self):
+        return {"message_id": self.message.id, "has_view": self.view != None, "deleted": self.deleted, "page": self.page}
+
 def check_components_fit(components_settings, extras=None):
     extras = extras if extras is not None else {}
     layout = [0,0,0,0,0]

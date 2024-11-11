@@ -1,14 +1,20 @@
-import src.utils.CallbackUtils as cbUtils
-import src.utils.DotNotator as DotNotator
-import src.DialogNodes.BaseType as BaseType
-from src.utils.Enums import POSSIBLE_PURPOSES
 import random
 import inspect
+import typing
 from datetime import datetime, timedelta
+from copy import copy, deepcopy
 from enum import Enum
 from jsonschema import validate, ValidationError
 
+from src.utils.SessionData import SessionData
+import src.utils.CallbackUtils as cbUtils
+import src.utils.DotNotator as DotNotator
+from src.utils.Enums import POSSIBLE_PURPOSES
+
+import src.DialogNodes.BaseType as BaseType
+
 class YAML_SELECTION(Enum):
+    '''enum for all possible location selections for reading or storing data for callbacks'''
     EVENT="event"
     SECTION="section"
     CONTROL="control"
@@ -37,34 +43,73 @@ def select_from_pack(name, datapack):
     elif name.startswith(YAML_SELECTION.ACTIVE_NODE.value):
         location = datapack.active_node
     elif name.startswith(YAML_SELECTION.ACTIVE_SESSION.value) and datapack.active_node.session is not None:
-        location = datapack.active_node.session.data
+        location = datapack.active_node.session
     elif name.startswith(YAML_SELECTION.GOAL_NODE.value):
         location = datapack.goal_node
     elif name.startswith(YAML_SELECTION.GOAL_SESSION.value) and datapack.goal_node is not None and datapack.goal_node.session is not None:
-        location = datapack.goal_node.session.data
+        location = datapack.goal_node.session
     elif name.startswith(YAML_SELECTION.CONTROL.value):
         location = datapack.control_data
     return location
 
 def handle_save_data(save_data, save_locations, datapack):
+    '''default way to find where to save and save data. can take multiple locations in and saves deepcopies of the data'''
     for save_location in save_locations:
-        location = select_from_pack(save_location, datapack)
-        if location is None:
-            continue
-        
-        split_names = save_location.split(".")
-        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
-        
-        field_name = split_names[-1]
-        if issubclass(location.__class__, BaseType.BaseNode):
-            setattr(location, field_name, save_data)
-        elif isinstance(location, dict):
-            location[field_name] = save_data
+        loop_save_data = deepcopy(save_data)
+        handle_save_ref(loop_save_data, save_location, datapack)
 
-def default_runtime_input_finder(runtime_input_key, data:cbUtils.CallbackDatapack):
-    section_overrides = data.section_data.get(runtime_input_key, None)
-    if runtime_input_key in data.section_data:
-        del data.section_data[runtime_input_key]
+def handle_save_ref(save_data, save_location, datapack):
+    '''special case of saving but no copying data. not recommended to do this in multiple locations'''
+    split_names = save_location.split(".")
+    location:"typing.Union[BaseType.BaseNode, SessionData]" = select_from_pack(save_location, datapack)
+
+    if location is None:
+        return
+
+    if split_names[0] in [loc.value for loc in NODES_AND_SESSION]:
+        # nodes and sessions handle saving themselves, so just pase location and data to them
+        location.set_data(split_names[1:], save_data)
+    else:
+        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
+    
+        field_name = split_names[-1]
+        if isinstance(location, dict):
+            location[field_name] = save_data
+        elif isinstance(location, list):
+            location.append(save_data)
+        elif issubclass(location.__class__, BaseType.BaseNode) or isinstance(location, SessionData):
+            location.set_data([field_name], save_data)
+        else:
+            setattr(location, field_name, save_data)
+
+def handle_delete_data(data_location, datapack):
+    split_names = data_location.split(".")
+    location:"typing.Union[BaseType.BaseNode, SessionData]" = select_from_pack(data_location, datapack)
+
+    if location is None:
+        return
+
+    if split_names[0] in [loc.value for loc in NODES_AND_SESSION]:
+        # nodes and sessions handle saving themselves, so just pase location and data to them
+        location.delete_data(split_names[1:])
+    else:
+        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
+    
+        field_name = split_names[-1]
+        if isinstance(location, dict):
+            del location[field_name]
+        elif isinstance(location, list):
+            location.pop(field_name)
+        elif issubclass(location.__class__, BaseType.BaseNode) or isinstance(location, SessionData):
+            location.delete_data([field_name])
+        else:
+            delattr(location, field_name)
+
+def default_runtime_input_finder(runtime_input_key, datapack:cbUtils.CallbackDatapack):
+    '''default way of fetching runtime overrides of parameters. Expects that data to be in section data and returns it after removing from section data'''
+    section_overrides = datapack.section_data.get(runtime_input_key, None)
+    if runtime_input_key in datapack.section_data:
+        del datapack.section_data[runtime_input_key]
     return section_overrides
 
 def default_merge_settings(base, override):
@@ -87,13 +132,13 @@ def default_handle_run_input(runtime_input_key, data:cbUtils.CallbackDatapack, m
     section_overrides = default_runtime_input_finder(runtime_input_key, data)
     return merge_handler(data.base_parameter, section_overrides)
 
-def grab_data(datapack, location, default=None):
+def get_data(datapack, location, default=None):
     '''use dot separate location name and grab whatever is stored there or return default if not found'''
     grab_location = select_from_pack(location, datapack)
     if grab_location is None:
         return default
     split_grab = location.split(".")
-    return DotNotator.parse_dot_notation(split_grab[1:], grab_location, default)
+    return DotNotator.parse_dot_notation(split_grab[1:], grab_location, default, custom_func_name="get_data")
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="transfer_data_override", schema={"type":"object", "properties":{
     "grab_location": {
@@ -131,10 +176,7 @@ def transfer_data(data:cbUtils.CallbackDatapack):
     handle_save_data(save_data, save_locations, data)
 
     if "delete_after" in section_parameter and section_parameter["delete_after"]:
-        if issubclass(grab_location.__class__, BaseType.BaseNode):
-            delattr(grab_location, split_grab[-1], save_data)
-        elif isinstance(grab_location, dict):
-            del grab_location[split_grab[-1]]
+        handle_delete_data(grab_location_name, data)
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="save_data_override", schema={
 "type": "object", "properties": {
@@ -174,16 +216,14 @@ def increment_value(data:cbUtils.CallbackDatapack):
     increment = section_parameter["increment"]
     split_names = location.split(".")
     
-    location = select_from_pack(location, data)
-    if location is None:
+    obj_location = select_from_pack(location, data)
+    if obj_location is None:
         return
-    location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
-    
+    obj_location = DotNotator.parse_dot_notation(split_names[1:-1], obj_location, None)
     field_name = split_names[-1]
-    if issubclass(location.__class__, BaseType.BaseNode):
-        setattr(location, field_name, getattr(location, field_name) + increment)
-    elif isinstance(location, dict):
-        location[field_name] = location[field_name] + increment
+    old_value = DotNotator.parse_dot_notation([field_name], obj_location, None)
+
+    handle_save_data(old_value + increment, [location], data)
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="random_chance_override", schema={"type":"number", "maximum": 1, "minimun": 0},
                            description_blurb="RNG with customizable chance (as a decimal number)")
@@ -324,17 +364,7 @@ def delete_data(data:cbUtils.CallbackDatapack):
     if grab_location_name is None:
         return
     
-    grab_location = select_from_pack(grab_location_name, data)
-    if grab_location is None:
-        return
-    split_grab = grab_location_name.split(".")
-    grab_location = DotNotator.parse_dot_notation_string(split_grab[1:-1], grab_location, None)
-    save_data = DotNotator.parse_dot_notation_string(split_grab[-1], grab_location, None)
-
-    if issubclass(grab_location.__class__, BaseType.BaseNode):
-        delattr(grab_location, split_grab[-1], save_data)
-    elif isinstance(grab_location, dict):
-        del grab_location[split_grab[-1]]
+    handle_delete_data(grab_location_name, data)
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="has_data_override", schema={
     "type": "string",
@@ -349,16 +379,10 @@ def has_data(data:cbUtils.CallbackDatapack):
     
     obj = select_from_pack(location_name, data)
     if obj is None:
-        return
-    split_grab = location_name.split(".")
-    obj = DotNotator.parse_dot_notation_string(split_grab[1:-1], obj, None)
+        return False
 
-    if obj:
-        if issubclass(obj.__class__, BaseType.BaseNode):
-            return split_grab[-1] in vars(obj)
-        elif isinstance(obj, dict):
-            return split_grab[-1] in obj
-    return False
+    obj = get_data(data, location_name, None)
+    return obj is None
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER])
 def did_session_timeout(data:cbUtils.CallbackDatapack):
