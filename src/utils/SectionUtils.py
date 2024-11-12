@@ -1,3 +1,5 @@
+import copy
+
 from src.utils.Enums import POSSIBLE_PURPOSES
 
 class SubSection:
@@ -8,11 +10,17 @@ class IfSubSection(SubSection):
         self.actions = actions if actions is not None else []
         self.filters = filters if filters is not None else []
         self.name = "if"
+    
+    def serialize(self):
+        return {"if": {"actions": serialize_section(self.actions), "filters": serialize_section(self.filters)}}
 
 class LogicOpSubSection(SubSection):
     def __init__(self, name, callbacks=None) -> None:
         self.name = name
         self.callbacks = callbacks if callbacks is not None else []
+
+    def serialize(self):
+        return {self.name: serialize_section(self.callbacks)}
 
 def formatSection(section, purpose:POSSIBLE_PURPOSES):
     for index, item in enumerate(section):
@@ -35,6 +43,14 @@ def formatSection(section, purpose:POSSIBLE_PURPOSES):
                     section[index] = LogicOpSubSection(name=func_name, callbacks=formatSection(args, purpose))
     return section
 
+def serialize_section(section):
+    serialized = []
+    for item in section:
+        if issubclass(item.__class__, SubSection):
+            serialized.append(item.serialize())
+        else:
+            serialized.append(copy.deepcopy(item))
+    return serialized
 
 def is_handler_structure(func_name, purpose:POSSIBLE_PURPOSES):
     if purpose in [POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER] and func_name in ["and", "or", "not"]:
