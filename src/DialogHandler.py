@@ -1104,7 +1104,7 @@ class DialogHandler():
         '''wrapper for how the system determines for ids of sessions. Just to make sure it is consistent across the handler'''
         return session.id
 
-    def snapshot_state(self):
+    async def snapshot_state(self):
         try:
             state = {}
             state["active_nodes"] = {}
@@ -1117,9 +1117,22 @@ class DialogHandler():
                 if node.session.id in state["sessions"]:
                     pass
                 state["sessions"][node.session.id] = node.session.serialize()
+
+            state["nodes"] = []
+            for node_id, node in self.graph_node_indexer.cache.items():
+                state["nodes"].append(node.serialize())
             
+            state["functions"] = {}
+            for cb_key, settings in self.functions_cache.cache.items():
+                state["functions"][cb_key] = {"func_name": settings["ref"].__name__}
+                base_purposes = [purpose.value for purpose in settings['ref'].allowed_purposes]
+                base_purposes.sort()
+                potential_overridden = [purpose.value for purpose in settings["permitted_purposes"]]
+                potential_overridden.sort()
+                if base_purposes != potential_overridden:
+                    state["functions"][cb_key].update({"permitted_purposes": [purpose.value for purpose in settings["permitted_purposes"]]})
+
             return state
-            #TODO: saving full state info
         except Exception as e:
             dev_log.error(f"error saving, {e}")
 

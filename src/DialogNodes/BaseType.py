@@ -332,6 +332,48 @@ required: ["id"]
                     if isinstance(transition.get("session_chaining"), str):
                         transition["session_chaining"] = {transition["session_chaining"]: None}
 
+    def serialize(self):
+        serialized = {
+            "id": self.id,
+            "version": self.yaml_version,
+            "TTL": self.TTL,
+            # "timeout": self.timeout,
+            "type": self.TYPE,
+            "actions": SectionUtils.serialize_section(self.actions),
+            "close_actions": SectionUtils.serialize_section(self.close_actions),
+            "graph_start": {event:(v if v is None else {
+                "filters": SectionUtils.serialize_section(v["filters"]),
+                "setup": SectionUtils.serialize_section(v["setup"])
+            }) for event,v in self.graph_start.items()},
+        }
+        if len(self.events) > 0:
+            serialized["events"] = {}
+            for event, v in self.events.items():
+                if v is None:
+                    serialized["events"][event] = v
+                    continue
+                serialized_event = {
+                    "filters": SectionUtils.serialize_section(v["filters"]),
+                    "actions": SectionUtils.serialize_section(v["actions"])
+                }
+                if "schedule_close" in v:
+                    serialized_event["schedule_close"] = v["schedule_close"]
+                serialized_event["transitions"] = []
+                for transition in v["transitions"]:
+                    serialized_transition = {
+                        "node_names": transition["node_names"],"transition_counters": SectionUtils.serialize_section(transition["transition_counters"]),
+                        "transition_filters": SectionUtils.serialize_section(transition["transition_filters"]),
+                        "transition_actions": SectionUtils.serialize_section(transition["transition_actions"])
+                    }
+                    if "schedule_close" in transition:
+                        serialized_transition["schedule_close"] = transition["schedule_close"]
+                    serialized_event["transitions"].append(serialized_transition)
+                serialized["events"][event] = serialized_event
+
+        if "session_chaining" in self.graph_start:
+            serialized["graph_start"]["session_chaining"] = {self.graph_start["session_chaining"]: self.get_graph_start_session_TTL()}
+        return serialized
+
     def set_TTL(self, timeout_duration:timedelta):
         if timeout_duration.total_seconds() == -1:
             # specifically, don't time out
