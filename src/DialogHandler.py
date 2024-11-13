@@ -119,7 +119,7 @@ class DialogHandler():
                 input_secondary_indices=[
                     Cache.FieldValueIndex("graph_node", keys_value_finder=lambda x: [x.graph_node.id]),
                     Cache.FieldValueIndex("event_forwarding", keys_value_finder=lambda x: [event_type for event_type in x.graph_node.events.keys() if event_type not in DialogHandler.NON_BROADCAST_EVENTS]),
-                    Cache.ObjContainsFieldIndex("has_session", keys_value_finder=lambda x: [x.session])
+                    Cache.ObjContainsFieldIndex("has_session", keys_value_finder=lambda x: [x.session] if x.session is not None else None)
                 ]
         )
         '''store for all active nodes this handler is in charge of handling events on. is mapping of unique id to a dictionary holding active node object and handler data for it'''
@@ -155,6 +155,46 @@ class DialogHandler():
                 raise Exception(f"trying to add extra attribute {key} but conflicts with existing attribute")
             setattr(self, key, option)
 
+    async def restore(self, data):
+        # assumes that functions were registered already, since version 0.1 of save doesn't record function file location so it won't be able to actually
+        # register from save. this is all double checking setup same as save
+        exec_log.info(f"starting to restore data")
+        for cb_key, func_data in data.get("functions", {}).items():
+            if cb_key not in self.functions_cache:
+                exec_log.warning(f"restore state lists function with key {cb_key} but not registered to handler. ignoring")
+            registered_func = self.functions_cache.get_ref(cb_key)
+            if "func_name" in func_data:
+                if func_data["func_name"] != registered_func["ref"].__name__:
+                    exec_log.warning(f"restoring function with key {cb_key}, but currently registered function may not be same as when save happened")
+            if "permitted_purposes" in func_data:
+                registerd_purposes = [purpose.value for purpose in registered_func["permitted_purposes"]]
+                registerd_purposes.sort()
+                saved_pursposes = func_data["permitted_purposes"]
+                saved_pursposes.sort()
+                if registerd_purposes != saved_pursposes:
+                    exec_log.warning(f"restoring function with key {cb_key} but current registered permitted purposes is not the same as when save happened")
+
+        nodes = nodeParser.parse_contents([data])
+        self.add_graph_nodes(nodes, overwrites_ok=True)
+        
+        session_cache:"dict[str, SessionData.SessionData]" = {}
+        for session_id, sn_data in data.get("sessions", {}).items():
+            session_cache[session_id] = SessionData.SessionData.deserialize_stub(session_id, sn_data)
+
+        for active_node_id, an_data in data.get("active_nodes", {}).items():
+            graph_node_id = an_data["graph_node_id"]
+            if graph_node_id not in self.graph_node_indexer:
+                exec_log.warning(f"restoring active node {active_node_id['id']} but its graph node {graph_node_id} is not loaded. discarding node")
+                continue
+            graph_node:BaseType.BaseGraphNode = self.graph_node_indexer.get_ref(graph_node_id)
+            active_node = await graph_node.deserialize_active_node(active_node_id, an_data, an_data.get("session", None), passed_to_callbacks=self.pass_to_callbacks)
+            if active_node is None:
+                exec_log.error(f"somethign went wrong in restoring node {active_node_id}. discarding node")
+                continue
+            if "session" in an_data:
+                session_cache[an_data["session"]].restore_linked_node(active_node)
+            self.active_node_cache.add_item(active_node_id, active_node)
+                
     '''#############################################################################################
     ################################################################################################
     ####                                   SETUP GRAPH NODES SECTION
@@ -422,7 +462,7 @@ class DialogHandler():
         # start is set up so that it has to call start callbacks and setup session before filters, events dont have start callbacks they are straight into filters then event callbacks.
 
         # first level filters for can start
-        exec_log.info(f"dialog handler id'd <{id(self)}> starting process to start at node <{node_id}> with event <{id(event)}><{event_key}> event deets: type <{type(event)}> <{event}>")
+        exec_log.info(f"dialog handler id'd <{id(self)}> doing start at node <{node_id}> with event <{id(event)}><{event_key}> event deets: type <{type(event)}> <{event}>")
         try:
             dev_log.debug(f"more deets for event at start at function <{vars(event)}>")
         except Exception as e:
@@ -1105,10 +1145,13 @@ class DialogHandler():
         return session.id
 
     async def snapshot_state(self):
+        start_time = datetime.utcnow()
         try:
+            dev_log.info(f"starting snapshot at {start_time}")
             state = {}
             state["active_nodes"] = {}
             for node_id, node in self.active_node_cache.cache.items():
+                dev_log.debug(f"saving active node {node_id}, none? {node is None}")
                 state["active_nodes"][node_id] = node.serialize()
             
             state["sessions"] = {}
@@ -1116,25 +1159,23 @@ class DialogHandler():
                 node:BaseType.BaseNode = self.active_node_cache.get_ref(node_key)
                 if node.session.id in state["sessions"]:
                     pass
+                dev_log.debug(f"saving session, none? {node.session is None}")
                 state["sessions"][node.session.id] = node.session.serialize()
 
             state["nodes"] = []
             for node_id, node in self.graph_node_indexer.cache.items():
+                dev_log.debug(f"saving graph node {node_id}, none? {node is None}")
                 state["nodes"].append(node.serialize())
             
             state["functions"] = {}
             for cb_key, settings in self.functions_cache.cache.items():
-                state["functions"][cb_key] = {"func_name": settings["ref"].__name__}
-                base_purposes = [purpose.value for purpose in settings['ref'].allowed_purposes]
-                base_purposes.sort()
-                potential_overridden = [purpose.value for purpose in settings["permitted_purposes"]]
-                potential_overridden.sort()
-                if base_purposes != potential_overridden:
-                    state["functions"][cb_key].update({"permitted_purposes": [purpose.value for purpose in settings["permitted_purposes"]]})
+                dev_log.debug(f"saving function under {cb_key}")
+                state["functions"][cb_key] = {"func_name": settings["ref"].__name__, "permitted_purposes": [purpose.value for purpose in settings["permitted_purposes"]]}
 
             return state
         except Exception as e:
             dev_log.error(f"error saving, {e}")
+        dev_log.info(f"done with snapshot that was started at {start_time}")
 
     '''#############################################################################################
     ################################################################################################

@@ -14,6 +14,22 @@ options: []'''
     def activate_node(self, session:typing.Union[None, SessionData.SessionData]=None) -> "BaseNode":
         return DiscordNode(self, session, timeout_duration=timedelta(seconds=self.TTL))
     
+    async def deserialize_active_node(self, id, serialized, session, passed_to_callbacks):
+        active_node:DiscordNode = await super().deserialize_active_node(id, serialized, session, passed_to_callbacks, already_built=self.activate_node(session))
+        bot = passed_to_callbacks["bot"]
+        for menu_name, data in serialized["menu_messages_info"].items():
+            menu_info = await NodetionDCMenuInfo.deserialize(data, bot)
+            if menu_info is None:
+                continue
+            active_node.record_menu_message(menu_name, menu_info)
+        
+        for data in serialized["managed_replies_info"]:
+            message_info = await NodetionDCMenuInfo.deserialize(data, bot)
+            if message_info is None:
+                continue
+            active_node.record_reply_message(message_info)
+        return active_node
+    
 class DiscordNode(BaseNode):
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
         super().__init__(graph_node, session, timeout_duration)

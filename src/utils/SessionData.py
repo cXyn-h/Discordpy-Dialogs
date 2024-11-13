@@ -77,8 +77,23 @@ class SessionData:
 
     def serialize(self):
         serialized = {}
-        serialized.update({"linked_nodes": [node.id for node in self.linked_nodes], "status": self.status.name, "timeout": self.timeout, "data": self.data})
+        serialized.update({"linked_nodes": [node.id for node in self.linked_nodes], "status": self.status.name, "timeout": self.timeout if self.timeout is None else self.timeout.isoformat(), "data": self.data})
         return serialized
+
+    @classmethod
+    def deserialize_stub(cls, id, serialized):
+        deserialized = cls()
+        deserialized.id = id
+        if serialized["timeout"] is None:
+            deserialized.timeout = None
+        else:
+            deserialized.timeout = datetime.fromisoformat(serialized["timeout"])
+        deserialized.status = ITEM_STATUS[serialized["status"]]
+        deserialized.data = serialized["data"]
+        return deserialized
+    
+    def restore_linked_node(self, node):
+        self.add_node(node)
 
     def can_set(self, location):
         '''checks wether field specified in location is something node definition allows overwritting or adding. only addresses data fields for node'''
