@@ -13,7 +13,21 @@ class NodetionDCMenuInfo:
         # Nodetion itself for data that can't fit in a single discord message.
 
     def serialize(self):
-        return {"message_id": self.message.id, "has_view": self.view != None, "deleted": self.deleted, "page": self.page}
+        return {"message_loc": str(self.message.channel.id) + "/" + str(self.message.id), "has_view": self.view != None, "deleted": self.deleted, "page": self.page}
+
+    @classmethod
+    async def deserialize(cls, data, bot):
+        message_loc = data["message_loc"].split("/")
+        channel = bot.get_channel(int(message_loc[0]))
+        if channel is None:
+            return None
+        message = await channel.fetch_message(int(message_loc[1]))
+        if message is None:
+            return None
+        deserialized = cls(message, ui.View.from_message(message, timeout=None) if data["has_view"] else None)
+        deserialized.deleted = data["deleted"]
+        deserialized.page = data["page"]
+        return deserialized
 
 def check_components_fit(components_settings, extras=None):
     extras = extras if extras is not None else {}

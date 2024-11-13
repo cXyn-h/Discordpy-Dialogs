@@ -2,14 +2,12 @@
 #TODO: double check if inherited from parent class's set and update methods should be used (probably, but further down pipeline problem)
 from datetime import datetime, timedelta
 import typing
-import src.utils.SessionData
 import yaml
 import copy
 import uuid
 
 from src.utils.Enums import POSSIBLE_PURPOSES, ITEM_STATUS
-
-import src.utils.Cache as Cache
+import src.utils.SessionData
 import src.utils.ValidationUtils as ValidationUtils
 import src.utils.DotNotator as DotNotator
 import src.utils.SectionUtils as SectionUtils
@@ -816,6 +814,21 @@ required: ["id"]
             # all other searched for things. just use the search itself. (skipping the custom oerride though, to prevent looping)
             return [], DotNotator.parse_dot_notation(keys, self, custom_func_name="indexer", skip_first_custom=True)
 
+    async def deserialize_active_node(self, id, serialized, session, passed_to_callbacks, already_built=None):
+        if already_built is None:
+            active_node = self.activate_node(session)
+        else:
+            active_node = already_built
+
+        active_node.id = id
+        if serialized["timeout"] is None:
+            active_node.timeout = None
+        else:
+            active_node.timeout = datetime.fromisoformat(serialized["timeout"])
+        active_node.status = ITEM_STATUS[serialized["status"]]
+        active_node.data = serialized["data"]
+        return active_node
+
 class BaseNode:
     def __init__(self, graph_node:BaseGraphNode, session:typing.Union[None, src.utils.SessionData.SessionData]=None, timeout_duration:timedelta=None) -> None:
         self.id = uuid.uuid4().hex
@@ -860,7 +873,7 @@ class BaseNode:
 
     def serialize(self):
         serialized = {}
-        serialized.update({"graph_node": self.graph_node.id, "status": self.status.name, "timeout": self.timeout, "data": self.data})
+        serialized.update({"graph_node_id": self.graph_node.id, "status": self.status.name, "timeout": self.timeout if self.timeout is None else self.timeout.isoformat(), "data": self.data})
         if self.session is not None:
             serialized.update({"session":self.session.id})
         return serialized
