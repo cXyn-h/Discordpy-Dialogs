@@ -194,6 +194,14 @@ class DialogHandler():
             if "session" in an_data:
                 session_cache[an_data["session"]].restore_linked_node(active_node)
             self.active_node_cache.add_item(active_node_id, active_node)
+
+        for session_id, session in session_cache.items():
+            if sn_data.timeout is not None:
+                self.create_timeout_tracker(session)
+
+        for node_id, node in self.active_node_cache.cache.items():
+            if node.timeout is not None:
+                self.create_timeout_tracker(node)
                 
     '''#############################################################################################
     ################################################################################################
