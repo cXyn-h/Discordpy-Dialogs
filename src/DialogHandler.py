@@ -13,9 +13,13 @@ import typing
 # copying GraphNode settings to protect objects
 import copy
 # validating function data
-from jsonschema import validate, ValidationError
+from jsonschema import validate, ValidationError, Draft202012Validator
 # exception catch with stack trace
 import traceback
+import os
+import yaml
+import referencing
+from referencing import Registry, Resource
 
 import src.DialogNodeParsing as nodeParser
 import src.DialogNodes.BaseType as BaseType
@@ -23,6 +27,7 @@ import src.BuiltinFuncs.BaseFuncs as BaseFuncs
 import src.DialogEvents.ExceptionEvent as ExceptionEvent
 
 import src.utils.CallbackUtils as CbUtils
+import src.utils.DirectoryUtils as DirectoryUtils
 # annotating function purposes
 from src.utils.Enums import POSSIBLE_PURPOSES, CLEANING_STATE, ITEM_STATUS, TASK_STATE
 import src.utils.SessionData as SessionData
@@ -31,6 +36,7 @@ import src.utils.Cache as Cache
 import src.utils.HandlerTasks as HandlerTasks
 import src.utils.TimeString as TimeString
 import src.utils.SectionUtils as SectionUtils
+import src.utils.SchemaUtils as SchemaUtils
 
 
 dev_log = logging.getLogger('Dev-Handler-Reporting')
@@ -148,6 +154,8 @@ class DialogHandler():
 
         self.pass_to_callbacks = pass_to_callbacks if pass_to_callbacks else {}
         '''data that handler should add on to pass to any callbacks it handles'''
+
+        self.function_schema_registry = Registry()
 
         # passed in as extra settings
         for key, option in kwargs.items():
@@ -319,33 +327,27 @@ class DialogHandler():
                 # elif func_ref.has_parameter is None and args is not None:
                 #     raise Exception(f"Exception validating node <{node_id}>, function <{func_name}> is listed in {string_rep}, function not meant to take arguments, extra values passed")
                 
-                if func_ref.runtime_input_key is None:
-                    # if takes runtime input then the yaml might not be complete, can't check validation
-                    # assuming if runtime input key not set then not taking stuff from runtime ever so all parameters must be to schema
-                    # if there are args, try to make sure they fit definitions
-                    # args provided at runtime aren't auto checked
-                    try:
-                        validate(args, func_ref.schema)
-                    except ValidationError as ve:
-                        path_elements = [str(x) for x in ve.absolute_path]
-                        path = string_rep
-                        if len(path_elements) > 0:
-                            path+="."+'.'.join(path_elements)
+                try:
+                    validator = SchemaUtils.get_validator_class()(func_ref.schema, registry=self.function_schema_registry)
+                    validator.validate(args)
+                except ValidationError as ve:
+                    path_elements = [str(x) for x in ve.absolute_path]
+                    path = string_rep
+                    if len(path_elements) > 0:
+                        path+="."+'.'.join(path_elements)
+                    if func_ref.runtime_input_key is None:
+                        # if takes runtime input then the yaml might not be complete, can't check validation
+                        # assuming if runtime input key not set then not taking stuff from runtime ever so all parameters must be to schema
+                        # if there are args, try to make sure they fit definitions
+                        # args provided at runtime aren't auto checked
                         except_message = f"Exception in verifying node '{node_id}', "\
                                         f"yaml definition provided for function '{func_name}' listed in section '{string_rep}' does not fit expected format "\
                                         f"error message: {ve.message}"
                         raise Exception(except_message)
-                else:
-                    try:
-                        validate(args, func_ref.schema)
-                    except ValidationError as ve:
-                        path_elements = [str(x) for x in ve.absolute_path]
-                        path = string_rep
-                        if len(path_elements) > 0:
-                            path+="."+'.'.join(path_elements)
+                    else:
                         except_message = f"yaml definition provided for function '{func_name}' listed in section '{string_rep}' does not fit expected format "\
-                                        f"error message: {ve.message}"
-                        warning_list.append(except_message)
+                                    f"error message: {ve.message}"
+                    warning_list.append(except_message)
             return warning_list
 
     def final_validate(self):
@@ -411,6 +413,17 @@ class DialogHandler():
         dev_log.debug(f"handler id'd {id(self)} registered callback <{func}> with key <{cb_key}> {'same as default,' if cb_key == func.cb_key else 'overridden,'} for purposes: " +\
                             f"<{[purpose.name for purpose in permitted_purposes]}> {'same as default' if permitted_purposes == func.allowed_purposes else 'overridden'}")
         #TODO: this needs upgrading if doing qualified names
+
+        if len(func.reference_schemas) > 0:
+            func_folder = DirectoryUtils.find_folder(func)
+            resources = []
+            for reference_schema in func.reference_schemas:
+                schema_contents = SchemaUtils.parse_schema_or_loc(reference_schema, func_folder)
+                schema_id = schema_contents["$id"]
+                
+                resources.append((schema_id, referencing.jsonschema.DRAFT202012.create_resource(schema_contents)))
+            self.function_schema_registry = self.function_schema_registry.with_resources(resources)
+
         self.functions_cache.add_item(cb_key, {"ref": func, "permitted_purposes": permitted_purposes, "registered_key": cb_key})
         return True
 

@@ -7,6 +7,7 @@ import logging
 import src.DialogNodes.BaseType as BaseType
 # pretty log messages and other tools
 import src.utils.LoggingHelper as logHelper
+import src.utils.SchemaUtils as SchemaUtils
 
 # for validing yaml has right format. 
 # why *JSON*schema? because it validates based on already read in dictionaries. Once yaml is read in there's no difference
@@ -133,8 +134,8 @@ def validate_type(type_module:types.ModuleType, type_name:str):
     graph_node.get_node_fields()
 
     # let the node error out if it can't get a good version of a schema for itself
-    graph_node.get_node_schema()
-    #TODO: maybe use some of JSONSchema meta schema stuff to validate schema is usable by system? not sure how yet
+    node_schema = graph_node.get_node_schema()
+    SchemaUtils.get_validator_class().check_schema(node_schema)
 
 def empty_cache(allowed_types:"dict[str,types.ModuleType]"=ALLOWED_NODE_TYPES):
     '''empties cache for different node types' definitions and schemas. Nodes may store some cached data as well so clears node caches of the node types

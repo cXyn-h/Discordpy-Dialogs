@@ -1,0 +1,12 @@
+# edit message schema, to update this, better to copy from send message schema and delete the redirect portion
+type: object
+properties:
+  menu_name:
+    type: string
+  message:
+    $ref: nodetion/extensions/discord/schemas/message
+  ping_with_reply:
+    type: boolean
+  redirect_message:
+    $ref: nodetion/extensions/discord/schemas/message
+unevaluatedProperties: false

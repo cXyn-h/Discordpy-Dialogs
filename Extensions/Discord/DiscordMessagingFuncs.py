@@ -212,7 +212,7 @@ async def send_message(data:cbUtils.CallbackDatapack):
             active_node.record_menu_message(settings["menu_name"], sent_message_info)
             #TODO: TEST out this with timeout event now being able to grab and save data
             data.section_data["previous_message"] = sent_message_info     
-cbUtils.set_callback_settings(send_message, schema="FuncSchemas/sendMessageSchema.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(send_message, schema="Schemas/sendMessage.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=["Schemas/message.yml"])
 
 async def edit_message(data:cbUtils.CallbackDatapack):
     '''callback that edits the menu specified or previous message'''
@@ -330,7 +330,7 @@ async def edit_message(data:cbUtils.CallbackDatapack):
                 sent_message = await event.channel.send(**redirect_message)
             active_node.record_menu_message(settings["menu_name"]+"_redirect", DiscordUtils.NodetionDCMenuInfo(sent_message, redirect_message["view"]))
     discord_logger.debug(f"finished")
-cbUtils.set_callback_settings(edit_message, schema="FuncSchemas/editMessageSchema.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(edit_message, schema="Schemas/editMessage.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=["Schemas/message.yml"])
 
 def setup_next_message(data:cbUtils.CallbackDatapack):
     settings = data.base_parameter
@@ -343,7 +343,7 @@ def setup_next_message(data:cbUtils.CallbackDatapack):
     merge_message_settings(next_message_settings, settings)
     data.section_data["next_message_settings"] = next_message_settings
     discord_logger.debug(f"set up next message settings, stored in section data. {data.section_data.keys()}")
-cbUtils.set_callback_settings(setup_next_message, schema="FuncSchemas/sendMessageSchema.yml", allowed_purposes=[POSSIBLE_PURPOSES.ACTION])
+cbUtils.set_callback_settings(setup_next_message, schema="Schemas/sendMessage.yml", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=["Schemas/message.yml"])
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION], schema={
     "oneOf":[

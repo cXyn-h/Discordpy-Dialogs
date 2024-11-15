@@ -1,0 +1,15 @@
+# send message schema
+type: object
+properties:
+  menu_name:
+    type: string
+  message:
+    $ref: nodetion/extensions/discord/schemas/message
+  dest_channel_id:
+    type: string
+    pattern: "((dm:|pm:)?[0-9]{17,19}|(dm:|pm:))"
+  ping_with_reply:
+    type: boolean
+  redirect_message:
+    $ref: nodetion/extensions/discord/schemas/message
+unevaluatedProperties: false
