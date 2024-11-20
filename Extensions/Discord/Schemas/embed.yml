@@ -1,0 +1,15 @@
+$id: nodetion/extensions/discord/schemas/embed
+type: object
+properties:
+  fields:
+    type: array
+    items:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        inline:
+          type: boolean
+      unevaluatedProperties: false

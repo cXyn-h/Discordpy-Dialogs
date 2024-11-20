@@ -79,11 +79,11 @@ def set_callback_settings(func, schema:typing.Union[dict, str]=None, allowed_pur
         func_folder = DirectoryUtils.find_folder(func) if isinstance(schema, str) else None
         for reference_schema in reference_schemas:
             SchemaUtils.parse_schema_or_loc(reference_schema, func_folder)
-    func.reference_schemas = reference_schemas if reference_schemas is not None else []
+    func.reference_schemas = [*reference_schemas] if reference_schemas is not None else []
     func.runtime_input_key = runtime_input_key
     func.cb_key = cb_key or func.__name__
-    func.allowed_events = allowed_events if allowed_events else []
-    func.alowed_nodes = allowed_nodes if allowed_nodes else []
+    func.allowed_events = [*allowed_events] if allowed_events else []
+    func.alowed_nodes = [*allowed_nodes] if allowed_nodes else []
     func.description_blurb= description_blurb
     return func
 

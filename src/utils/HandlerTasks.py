@@ -17,7 +17,7 @@ class HandlerTask(asyncio.Task):
     '''base task object for any handler tasks. takes in a callback function that does the meat of the task. Expected to be a function of the handler.
     Basic backbone of the task is to use locking tasks for wait tasks to wait for before starting this task.
     Any extra variables and how to pass them to handler function or other modifications to calling that function happen in do_task'''
-    def __init__(self, handler_func, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=3) -> None:
         super().__init__(coro=self.task_runner(), loop=loop, name=name)
 
         self.type = "Base"
@@ -45,7 +45,7 @@ class HandlerTask(asyncio.Task):
         return await self.handler_func()
 
 class HandleEventTask(HandlerTask):
-    def __init__(self, handler_func, event_type, event, loop: AbstractEventLoop = None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, event_type, event, loop: AbstractEventLoop = None, name=None, locking_tasks=None, waiting_period_sec=3) -> None:
         super().__init__(handler_func, loop=loop, name=name, locking_tasks=locking_tasks, waiting_period_sec=waiting_period_sec)
         self.event_type = event_type
         self.event = event
@@ -55,7 +55,7 @@ class HandleEventTask(HandlerTask):
         return await self.handler_func(self.event_type, self.event, self.waiting_period_sec)
     
 class HandlerSystemEventTask(HandleEventTask):
-    def __init__(self, handler_func, event_type, event, loop: AbstractEventLoop = None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, event_type, event, loop: AbstractEventLoop = None, name=None, locking_tasks=None, waiting_period_sec=3) -> None:
         super().__init__(handler_func, event_type, event, loop, name, locking_tasks, waiting_period_sec)
         self.type = "SystemTask"
 
@@ -63,7 +63,7 @@ class HandlerSystemEventTask(HandleEventTask):
         return await self.handler_func()
 
 class HandleSessionEventTask(HandlerTask):
-    def __init__(self, handler_func, session, event_type, event, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, session, event_type, event, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=3) -> None:
         super().__init__(handler_func, loop=loop, name=name, locking_tasks=locking_tasks, waiting_period_sec=waiting_period_sec)
         self.session = session
         self.event_type = event_type
@@ -77,7 +77,7 @@ class HandleSessionEventTask(HandlerTask):
         self.node_tasks = node_tasks
     
 class HandleNodeEventTask(HandlerTask):
-    def __init__(self, handler_func, active_node, event_type, event, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, active_node, event_type, event, loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=3) -> None:
         super().__init__(handler_func, loop=loop, name=name, locking_tasks=locking_tasks, waiting_period_sec=waiting_period_sec)
         self.active_node = active_node
         self.event_type = event_type
@@ -88,7 +88,7 @@ class HandleNodeEventTask(HandlerTask):
         return await self.handler_func(self.active_node, self.event_type, self.event)
     
 class HandleTimeoutWaiter(HandlerTask):
-    def __init__(self, handler_func, timeoutable, loop: AbstractEventLoop = None, name=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, timeoutable, loop: AbstractEventLoop = None, name=None, waiting_period_sec=3) -> None:
         super().__init__(handler_func, loop=loop, name=name, locking_tasks=[], waiting_period_sec=waiting_period_sec)
         self.timeoutable = timeoutable
         self.type="TimeoutWaiter"
@@ -98,7 +98,7 @@ class HandleTimeoutWaiter(HandlerTask):
     
     
 class HandleTimeoutTask(HandlerTask):
-    def __init__(self, handler_func, timeoutable, type:typing.Literal["Node","Session"], loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=5) -> None:
+    def __init__(self, handler_func, timeoutable, type:typing.Literal["Node","Session"], loop:AbstractEventLoop=None, name=None, locking_tasks=None, waiting_period_sec=3) -> None:
         super().__init__(handler_func, loop=loop, name=name, locking_tasks=locking_tasks, waiting_period_sec=waiting_period_sec)
         self.timeoutable = timeoutable
         self.type = type+"TimeoutTask"

@@ -105,12 +105,13 @@ def handle_delete_data(data_location, datapack):
         else:
             delattr(location, field_name)
 
-def default_runtime_input_finder(runtime_input_key, datapack:cbUtils.CallbackDatapack):
+def default_runtime_input_finder(runtime_input_key, datapack:cbUtils.CallbackDatapack, default=None):
     '''default way of fetching runtime overrides of parameters. Expects that data to be in section data and returns it after removing from section data'''
-    section_overrides = datapack.section_data.get(runtime_input_key, None)
     if runtime_input_key in datapack.section_data:
+        section_overrides = datapack.section_data.get(runtime_input_key, None)
         del datapack.section_data[runtime_input_key]
-    return section_overrides
+        return section_overrides
+    return default
 
 def default_merge_settings(base, override):
     '''default strategy of merging parameter settings for callbacks. If paramter is dictionary, then if override is a dict, updates base with override
@@ -238,7 +239,7 @@ def random_chance(data:cbUtils.CallbackDatapack):
 #TODO: do nested support
     # "variable": {"type":"string", "pattern": "^(current_session|goal_session|current_node|goal_node|node|session)(\.[\w]+)+$"},
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="simple_compare_override", schema={"type":"object", "properties":{
-    "variable": {"type":"string", "pattern": REGEX_OR_OUTPUT_SOURCES+"(\.[\w\d]*)+"},
+    "variable": {"type":"string", "pattern": REGEX_OR_INPUT_SOURCES+"(\.[\w\d]*)+"},
     "operator": {"type": "string", "enum":["==", "<", ">", "<=", ">=", "!="]},
     "value": {"type": "integer"}
 }, "required": ["operator", "variable", "value"]}, description_blurb="string for comparing variable, to single value")
@@ -250,7 +251,7 @@ def simple_compare(data:cbUtils.CallbackDatapack):
     location = select_from_pack(settings["variable"], data)
     if location is None:
         return
-    variable_value = DotNotator.parse_dot_notation_string(split_names[1:], location, None)
+    variable_value = DotNotator.parse_dot_notation(split_names[1:], location, None)
     
     if variable_value is None:
         return False

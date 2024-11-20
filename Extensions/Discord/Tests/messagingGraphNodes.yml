@@ -1,0 +1,355 @@
+nodes:
+- id: "test_home"
+  type: Discord
+  version: "1.0.0"
+  graph_start:
+    message_command:
+    slash_command:
+  close_actions:
+  - remove_message
+  actions:
+  - send_message:
+      menu_name: "home"
+      message: 
+        content: 'this is home message. It should reply to command. reply with "editing" for more tests'
+        components:
+        - custom_id: int_done_exists
+          type: Button
+          label: test int_done_exists
+        - custom_id: int_done_new
+          type: Button
+          label: test int_done_new
+        - custom_id: int_wait_exists
+          type: Button
+          label: test int_wait_exists
+        - custom_id: regInt_exists
+          type: Button
+          label: test regInt_exists
+        - custom_id: int_vars
+          type: Button
+          label: test int_vars
+        - custom_id: reg_vars
+          type: Button
+          label: test reg_vars
+
+        # - custom_id: regular_fail_edit
+        #   type: Button
+        #   label: resend fail
+        # - custom_id: send_interaction_response
+        #   type: Button
+        #   label: send success
+        # - custom_id: double_interaction_response
+        #   type: Button
+        #   label: double send
+      reply_to: event_message
+  events:
+    message:
+      filters:
+      - is_reply
+      transitions:
+      - node_names: "edit_home"
+        transition_filters:
+        - simple_compare:
+            variable: event.content
+            operator: "=="
+            value: "editing"
+    button_click:
+      filters:
+      - clicked_this_menu
+      actions:
+      - if:
+          filters:
+          - button_is: int_done_exists
+          actions:
+          - send_message:
+              menu_name: test_1
+              correction_attempts: 0
+              respond_interaction: True
+              message:
+                content: this is base test 1 message, it should be edited later
+          - wait: 1
+          - send_message:
+              menu_name: test_1
+              correction_attempts: 0
+              respond_interaction: True
+              message:
+                content: edit attempt 1. should not be edited into test 1
+          - wait: 1
+          - send_message:
+              menu_name: test_1
+              correction_attempts: 2
+              respond_interaction: True
+              message:
+                content: edit attempt 2. should skip attempt 1 to edit test 1
+      - if:
+          filters:
+          - button_is: int_done_new
+          actions:
+          - send_message:
+              menu_name: test_2
+              respond_interaction: True
+              message:
+                content: this is base test 2 message
+          - wait: 1
+          - send_message:
+              menu_name: test_2
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: this is test 2 attempt 1, should not see this
+          - wait: 1
+          - send_message:
+              menu_name: test_2_2
+              respond_interaction: True
+              correction_attempts: 1
+              message:
+                content: this is test 2 attempt 2, attempt 1 should be skipped and this should appear
+      # - if: 
+      #     filters:
+      #     - button_is: int_wait_exists
+      #     actions:
+      #     - send_message:
+      #         menu_name: test_3
+      #         correction_attempts: 0
+      #         message:
+      #           content: message for testing, supposed to be sent and not do anything
+      #     - send_message:
+      #         menu_name: test_3
+      #         respond_interaction: True
+      #         correction_attempts: 0
+      #         message:
+      #           content: this is test 3 attempt 1. should not see this
+      #     - wait: 1
+      #     - send_message:
+      #         menu_name: test_3
+      #         respond_interaction: True
+      #         correction_attempts: 1
+      #         message:
+      #           content: this is test 3 this should edit the message for test3 and complete interaction
+
+      - if:
+          filters:
+          - button_is: regInt_exists
+          actions:
+          - send_message:
+              menu_name: test_4
+              respond_interaction: False
+              correction_attempts: 0
+              message:
+                content: this is base test 4 message, it should be edited
+          - wait: 1
+          - send_message:
+              menu_name: test_4
+              respond_interaction: False
+              correction_attempts: 0
+              message:
+                content: this is test 4 attempt 1, should not see this
+          - wait: 1
+          - send_message:
+              menu_name: test_4
+              respond_interaction: False
+              correction_attempts: 1
+              message:
+                content: this is test 4 attempt 2, should skip attempt 1 and this should appear. interaction should fail
+      - if:
+          filters:
+          - button_is: int_vars
+          actions:
+          - send_message:
+              menu_name: test_5
+              correction_attempts: 0
+              dest_channel_id: "dsfeg"
+              reply_to: https://discord.com/channels/714598719873613830/723965894451003483/1308676137345482822
+              respond_interaction: True
+              ephemeral_interaction: True
+              message:
+                content: this is test 5, it should send as an ephemeral message and interaction succeeds. ignores the other regular send variables
+      - if:
+          filters:
+          - button_is: reg_vars
+          actions:
+          - send_message:
+              menu_name: test_6_1
+              correction_attempts: 0
+              reply_to: https://discord.com/channels/714598719873613830/723965894451003483/1308676137345482822
+              ping_with_reply: True
+              message:
+                content: this is test 6_1, should send pinging replying to random message
+          - send_message:
+              menu_name: test_6_2
+              correction_attempts: 0
+              dest_channel_id: "723965894451003483"
+              message:
+                content: this is test 6_2, should send in test channel
+          - send_message:
+              menu_name: test_6_3
+              correction_attempts: 0
+              reply_to: event_message
+              ping_with_reply: False
+              ephemeral_interaction: True
+              message:
+                content: this is test 6_3, should reply to what triggered event, no pings and ignore interaction settings
+
+      - if:
+          filters:
+          - button_is: regular_fail_edit
+          actions:
+          - send_message:
+              menu_name: home
+              correction_attempts: 0
+              message:
+                content: shouldn't see this on home message
+          - send_message:
+              menu_name: resent_report
+              correction_attempts: 0
+              message:
+                content: only this one message should appear after clicking "resend fail" and interaction fails
+      - if:
+          filters:
+          - button_is: send_interaction_response
+          actions:
+          - send_message:
+              menu_name: send_success
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: this should be only message appearing after clicking send success. Interaction should succeed
+      - if:
+          filters:
+          - button_is: double_interaction_response
+          actions:
+          - send_message:
+              menu_name: double_first
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: first of double seeing if responding to interaction. should compelete it, and should have two messages, second one edited
+          - send_message:
+              menu_name: double_second
+              respond_interaction: True
+              correction_attempts: 1
+              message:
+                content: second of double seeing if responding to interaction. Should still see this responding to same message
+          - send_message:
+              menu_name: double_second
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: should not see this edit
+          # - send_message:
+          #     menu_name: double_second
+          #     respond_interaction: True
+          #     correction_attempts: 1
+          #     message:
+          #       content: second of double seeing if responding to interaction. Should still see this responding to same message, but also edited             
+
+- id: edit_home
+  type: Discord
+  version: "1.0.0"
+  close_actions:
+  - remove_message
+  actions:
+  - send_message:
+      menu_name: editee
+      respond_interaction: True
+      ephemeral_interaction: True
+      silent: True
+      ping_with_reply: True
+      correction_attempts: 0
+      message:
+        content: this should be only message appearing after sending editing. it will be edited. should ignore iteraction settings
+        components:
+        - custom_id: int_done_exists
+          type: button
+          label: test int_done_exists
+        - custom_id: int_done_new
+          type: Button
+          label: test int_done_new
+        - custom_id: ephemeral_response
+          type: Button
+          label: ephemeral
+        - custom_id: edit_ephemeral
+          type: Button
+          label: test edit_ephemeral
+
+  events:
+    button_click:
+      filters:
+      - clicked_this_menu
+      actions:
+      - if:
+          filters:
+          - button_is: int_done_exists
+          actions:
+          - edit_message:
+              menu_name: editee
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: edit one to eat up interaction
+          - wait: 1
+          - edit_message:
+              menu_name: editee
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: edit attempt 1 should not see
+          - wait: 1
+          - edit_message:
+              menu_name: editee
+              respond_interaction: True
+              correction_attempts: 1
+              message:
+                content: edit attempt 2 edit home should be edited to attempt 2. interaction should succeed
+      - if:
+          filters:
+          - button_is: int_done_new
+          actions:
+          - edit_message:
+              menu_name: editee
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: edit one to eat up interaction
+          - wait: 1
+          - edit_message:
+              menu_name: edit_test_2
+              respond_interaction: True
+              correction_attempts: 0
+              message:
+                content: edit attempt 1 should not see
+          - wait: 1
+          - edit_message:
+              menu_name: edit_test_2
+              respond_interaction: True
+              correction_attempts: 2
+              message:
+                content: edit attempt 2 edit home should be edited to attempt 2. should show up as new message
+      - if:
+          filters:
+          - button_is: ephemeral_response
+          actions:
+          - send_message:
+              menu_name: ephemeral_menu
+              respond_interaction: True
+              ephemeral_interaction: True
+              message:
+                content: this should be only response to button
+      - if:
+          filters:
+          - button_is: edit_ephemeral
+          actions:
+          - edit_message:
+              menu_name: ephemeral_menu
+              respond_interaction: True
+              corrrection_attempts: 1
+              message:
+                content: this should be only response to button, now edited
+          - wait: 1
+          - send_message:
+              menu_name: edit_other_confirm
+              respond_interaction: True
+              correction_attempts: 0
+              ephemeral: true
+              message: 
+                content: this should be an ephemeral confirmation that interaction succeeded and other ephemeral message was edited.

@@ -10,6 +10,7 @@ import Extensions.Discord.DiscordNode as DiscordNodeType
 import src.DialogNodes.BaseType as BaseType
 import src.BuiltinFuncs.BaseFuncs as NodetionBaseFuncs
 import src.utils.CallbackUtils as cbUtils
+import src.utils.SchemaUtils as SchemaUtils
 from src.utils.Enums import POSSIBLE_PURPOSES
 
 import logging
@@ -21,9 +22,11 @@ discord_logger.setLevel(logging.INFO)
 ALL_MENUS_KEY = "*all_menus"
 ALL_REPLIES_KEY = "*all_replies"
 
+DISCORD_MESSAGE_SCHEMA_PACK = ["Schemas/message.yml", "Schemas/poll.yml", "Schemas/embed.yml", "Schemas/messageComponent.yml"]
+
 def merge_message_settings(base, addon):
     '''takes two sets of messages and their sending options and moves settings in addon into base. Overwrites simple types, adds on to lists'''
-    for setting in ["menu_name", "dest_channel_id", "ping_with_reply"]:
+    for setting in ["menu_name", "dest_channel_id", "ping_with_reply", "reply_to", "ephemeral", "silent"]:
         if setting in addon:
             base[setting] = addon[setting]
     if "redirect_message" in addon:
@@ -48,39 +51,24 @@ def merge_message_settings(base, addon):
                 base["message"][setting].extend(addon["message"][setting])
     return base
 
-#TODO: add checks to make sure there is a valid set of data after combining message settings from yaml and overrides
-async def send_message(data:cbUtils.CallbackDatapack):
-    '''callback function that sends a discord message with provided settings.'''
+async def gather_send_message_settings(data:cbUtils.CallbackDatapack, settings, message_components):
+    '''organizes settings to pass to send message using passed in data'''
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
     bot = data.bot
 
-    # override yaml with anything that is generated in function_data
-    runtime_input_key = "next_message_settings"
-    settings = data.base_parameter
-    if runtime_input_key in data.section_data:
-        settings = merge_message_settings(data.base_parameter if data.base_parameter is not None else {}, data.section_data[runtime_input_key])
-        del data.section_data[runtime_input_key]
-    
-    discord_logger.debug(f"send message settings chosen are <{settings}>")
-
-    if settings["menu_name"] in active_node.menu_messages_info:
-        discord_logger.debug(f"send message going to edit message instead for menu <{settings['menu_name']}>")
-        # found there's already a menu being tracked under given name, need to handle existing tracking, edit should already know how
-        data.base_parameter = settings
-        return await edit_message(data)
-
-    message_components = DiscordUtils.build_discord_message(settings["message"], default_fills={"view":None})
-    # find out which channel message supposed to be sent to as that affects how we are replying to interaction
-    # let function callbacks that already found channel object override by passing in dest_channel key, otherwise need to read id and try to fetch channel
+    # first thing is finding channel object to send message to
+    dest_channel = None
     try:
-        if "dest_channel" in settings:
+        if "dest_channel" in settings and isinstance(settings["dest_channel"], discord.TextChannel):
+            # special override allowed for callbacks to just pass a channel object to send in
             dest_channel = settings["dest_channel"]
             discord_logger.debug(f"dest channel was overridden in settings <{dest_channel}>")
         elif "dest_channel_id" in settings:
             discord_logger.debug(f"dest channel is id. searching given value <{settings['dest_channel_id']}>")
             # either just a prefix "dm:" or "pm:", prefix and then user id, or no prefix and is channel id (dm or otherwise)
             if isinstance(settings["dest_channel_id"], str) and settings["dest_channel_id"].find(":") > -1:
+                # if is string and using special formatting
                 discord_logger.debug(f"dest channel id is dm for user")
                 if len(settings["dest_channel_id"]) > 3:
                     try:
@@ -108,6 +96,15 @@ async def send_message(data:cbUtils.CallbackDatapack):
             else:
                 dest_channel = bot.get_channel(int(settings["dest_channel_id"]))
                 discord_logger.debug(f"dest channel id in settings doesn't need to be split, found channel is <{dest_channel}>")
+        elif "reply_to" in settings:
+            if isinstance(settings["reply_to"], str):
+                if settings["reply_to"] == "event_message":
+                    dest_channel = event.channel
+                else:
+                    parts = settings["reply_to"].split('/')
+                    dest_channel = bot.get_channel(int(parts[-2]))
+            else:
+                dest_channel = settings["reply_to"].channel
         elif active_node.session is not None and "default_channel" in active_node.session.data:
             dest_channel = bot.get_channel(int(active_node.session.data["default_channel"]))
         elif hasattr(active_node, "default_channel"):
@@ -117,220 +114,336 @@ async def send_message(data:cbUtils.CallbackDatapack):
             discord_logger.debug(f"sanity check vars of active node {vars(active_node)}")
             dest_channel = event.channel
             discord_logger.debug(f"no dest channel. defaulting to channel event is from <{dest_channel}>")
-        if dest_channel is None:
-                discord_logger.debug(f"send message early found that dest channel is invalid")
-                # invalid id or other issue fetching channel object
-                return
     except Exception as e:
         discord_logger.error(f"SOMETHING REALLY BAD IN SEND MESSAGE {e}")
-    dest_is_dm = dest_channel.type == discord.ChannelType.private
 
-    discord_logger.debug(f"send message found intended dest channel, continuing")
-    if isinstance(event, Interaction) and not event.response.is_done():
-        discord_logger.debug(f"send message found interaction not responded to")
-        # if interaction, want to try replying to event as much as possible.
-        # if event already handled, try sending regular way
-        #TODO: ephemeral message support? might mess with storing message in node data?
-        #TODO: could add ping_with_reply checking on replying to interaction part
-        if event.channel.id == dest_channel.id:
-            discord_logger.debug(f"send message interaction happened in same channel, can send reply")
-            # message meant to be sent in channel event originated from, safe to send as response
-            dirty = False
-            if message_components["view"] is None:
-                del message_components["view"]
-                dirty = True
-            # interaction send_message doesn't like view being null, but message info uses null to mean no view, so remove briefly for send message
-            await event.response.send_message(**message_components)
-            if dirty:
-                message_components["view"] = None
-            sent_message = await event.original_response()
-            discord_logger.debug(f"interaction sent response is <{sent_message.id}>, {sent_message}")
-            sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
-            active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            data.section_data["previous_message"] = sent_message_info
-        else:
-            discord_logger.debug(f"send message interaction didn't happen in destination channel")
-            # event channel is different from intended destination
-            if "redirect_message" in settings:
-                discord_logger.debug(f"different destination there's a redirect to send")
-                # settings on a message to draw attention to content has been sent somewhere else
-                redirect_message = DiscordUtils.build_discord_message(settings["redirect_message"])
-                await event.response.send_message(**redirect_message)
-                sent_message = await event.original_response()
-                if "view" not in redirect_message:
-                    # interaction send_message doesn't like view is None, but using none types in message info for nothing there
-                    redirect_message["view"] = None
-                discord_logger.debug(f"interaction replied with redirect message, the message is <{sent_message.id}>, <{sent_message}>")
-                active_node.record_menu_message(settings["menu_name"]+"_redirect", DiscordUtils.NodetionDCMenuInfo(sent_message, redirect_message["view"]))
-            sent_message = await dest_channel.send(**message_components)
-            discord_logger.debug(f"sent actual message to correct destination channel, the message is <{sent_message.id}>, <{sent_message}>")
-            sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
-            active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            data.section_data["previous_message"] = sent_message_info
-    else:
-        discord_logger.debug(f"send message either interaction already responded or non-interaction response")
-        # either non-interaction event or interaction already handled
-        # take message and send to given dest
-        if isinstance(event, discord.Message):
-            reference_message = event
-        elif isinstance(event, Interaction) or isinstance(event, Context):
-            # interaction or message command context
-            reference_message = event.message
-        else:
-            discord_logger.warning(f"send message not given valid event type to get user for dm channel cause not specified in settings")
-            return None
-        if event.channel.id == dest_channel.id:
-            discord_logger.debug(f"send message can respond in same channel")
-            if "ping_with_reply" in settings:
-                discord_logger.debug(f"need to reply to message")
-                sent_message = await event.channel.send(**message_components, allowed_mentions=discord.AllowedMentions(replied_user=settings["ping_with_reply"]), reference=reference_message)
-            else:
-                discord_logger.debug(f"no reply setting so regular send")
-                sent_message = await event.channel.send(**message_components)
-            discord_logger.debug(f"sent message is <{sent_message.id}>, <{sent_message}>")
-            sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
-            active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            data.section_data["previous_message"] = sent_message_info
-        else:
-            discord_logger.debug(f"send message non-interaction response is not in destination channel")
-            # event channel is different from intended destination
-            if "redirect_message" in settings:
-                discord_logger.debug(f"there's a redirect message")
-                # settings on a message to draw attention to content has been sent somewhere else
-                redirect_message = DiscordUtils.build_discord_message(settings["redirect_message"], default_fills={"view":None})
-                if "ping_with_reply" in settings:
-                    discord_logger.debug(f"need to reply using redirect")
-                    sent_message = await event.channel.send(**redirect_message, allowed_mentions=discord.AllowedMentions(replied_user=settings["ping_with_reply"]), reference=reference_message)
+    if dest_channel is None or not isinstance(dest_channel, discord.TextChannel):
+        raise Exception(f"send message early found that dest channel is invalid")
+        # invalid id or other issue fetching channel object
+
+    reference = None
+    discord_logger.debug(f"settings keys {settings.keys()} chosen dest_channel {dest_channel.id}")
+    # gathering what message to reply to. only set if its in the same channel as where we intend to send to
+    if "reply_to" in settings:
+        discord_logger.debug(f"trying to retrieve reference message for sending, settings {settings['reply_to']}")
+        try: 
+            if isinstance(settings["reply_to"], str):
+                if settings["reply_to"] == "event_message":
+                    discord_logger.debug(f"using event message")
+                    if event.channel.id == dest_channel.id:
+                        if isinstance(event, discord.Message):
+                            reference = event
+                        elif isinstance(event, Interaction) or isinstance(event, Context):
+                            reference = event.message
                 else:
-                    discord_logger.debug(f"no reply setting")
-                    sent_message = await event.channel.send(**redirect_message)
-                discord_logger.debug(f"sent redirect is <{sent_message.id}>, <{sent_message}>")
-                active_node.record_menu_message(settings["menu_name"]+"_redirect", DiscordUtils.NodetionDCMenuInfo(sent_message, redirect_message["view"]))
-            sent_message = await dest_channel.send(**message_components)
-            discord_logger.debug(f"sent message is <{sent_message.id}>, <{sent_message}>")
-            sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
-            active_node.record_menu_message(settings["menu_name"], sent_message_info)
-            #TODO: TEST out this with timeout event now being able to grab and save data
-            data.section_data["previous_message"] = sent_message_info     
-cbUtils.set_callback_settings(send_message, schema="Schemas/sendMessage.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=["Schemas/message.yml"])
+                    discord_logger.debug(f"splitting jump link for reference message")
+                    parts = settings["reply_to"].split('/')
+                    if int(parts[-2]) == dest_channel.id:
+                        discord_logger.debug(f"reply split is ready to set reference.")
+                        reference = dest_channel.get_partial_message(int(parts[-1]))
+                        discord_logger.debug(f"reference is {reference.id}")
+            elif settings["reply_to"].channel.id == dest_channel.id:
+                reference = settings["reply_to"]
+        except Exception as e:
+            discord_logger.warning(f"tried to get reference message, but failed. ignoring it, {e}")
+    
+    send_settings = message_components
+    if reference is not None:
+        discord_logger.debug(f"reference of next sent message is {type(reference)} {reference.jump_url}")
+        send_settings.update({"reference": reference.to_reference()})
+    if "ping_with_reply" in settings:
+        send_settings.update({"allowed_mentions": discord.AllowedMentions(replied_user=settings["ping_with_reply"])})
+    if "silent" in settings:
+        send_settings.update({"silent": settings["silent"]})
+    if "ephemeral_interaction" in settings:
+        send_settings.update({"ephemeral": settings["ephemeral_interaction"]})
+    if "ephemeral" in settings:
+        send_settings.update({"ephemeral": settings["ephemeral"]})
+    return dest_channel, send_settings
 
-async def edit_message(data:cbUtils.CallbackDatapack):
-    '''callback that edits the menu specified or previous message'''
+#TODO: add checks to make sure there is a valid set of data after combining message settings from yaml and overrides
+async def send_message(data:cbUtils.CallbackDatapack):
+    '''callback function that sends a discord message with provided settings.'''
+    # main operation is trying to send message under given menu name. with additional setting of interaction response if possible and wanted
     active_node:DiscordNodeType.DiscordNode = data.active_node
     event = data.event
-    bot = data.bot
+    discord_logger.info(f"send message called on node <{active_node.id}><{active_node.graph_node.id}> event {type(event)}")
 
-    settings = data.base_parameter
-    if "next_message_settings" in data.section_data:
-        settings = merge_message_settings(data.base_parameter if data.base_parameter is not None else {}, data.section_data["next_message_settings"])
-        del data.section_data["next_message_settings"]
-
-    if "menu_name" in settings and settings["menu_name"] not in active_node.menu_messages_info:
-        discord_logger.debug(f"edit message found menu name listed and not recorded, going to send instead")
-        # means this menu message hasn't been sent before, can't do edit, do the send message callback, it will assume destination is same channel
-        data.base_parameter = settings
-        return await send_message(data)
-
+    # override yaml with anything that is generated in function_data
+    runtime_input_key = "next_message_settings"
+    override_settings = NodetionBaseFuncs.default_runtime_input_finder(runtime_input_key, data, default={})
+    settings = merge_message_settings(data.base_parameter if data.base_parameter is not None else {}, override_settings)
     message_components = DiscordUtils.build_discord_message(settings["message"], default_fills={"view":None})
-    made_edits = False
+    
+    discord_logger.debug(f"send message settings chosen are <{settings}>")
 
-    # if menu name specified, that is what we are editing with message
-    #   if interaction want to try edit to fulfill interaction response
-    #   otherwise edit message stored in info
-    # otherwise editing whatever caused the event
-    # if there is a rediret message, send that as well
-    if "menu_name" in settings:
-        discord_logger.debug(f"edit message menu name specified")
-        message_info = active_node.menu_messages_info[settings["menu_name"]]
+    respond_interaction = "respond_interaction" in settings and \
+            isinstance(settings["respond_interaction"], bool) and \
+            settings["respond_interaction"]
+    correction_attempts = 1
+    '''number of times to allow trying something different to get message sent'''
+    if "correction_attempts" in settings and isinstance(settings["correction_attempts"], int):
+        correction_attempts = settings["correction_attempts"]
+    menu_name = settings["menu_name"]
+
+    if respond_interaction and isinstance(event, Interaction):
+        # this is an interaction and we want to try responding. only case to do the interaction response
+        # doing secodary attempts to allow for chained send_message calls for same event that all can attempt to repond to interaction
+        # interaction already decides destination and what to reply to
+        discord_logger.debug(f"found interaction want to respond to ")
+        if "dest_channel_id" in settings:
+            del settings["dest_channel_id"]
+        if "reply_to" in settings:
+            del settings["reply_to"]
+        if "dest_channel" in settings:
+            del settings["dest_channel"]       
+        if event.response.is_done():
+            discord_logger.debug(f"found interaction want to respond to and it already was responded to")
+            # done means treat regular send/edit, existing menu means check editing
+            if "ephemeral_interaction" in settings:
+                del settings["ephemeral_interaction"]
+
+            if menu_name in active_node.menu_messages_info:
+                discord_logger.debug(f"send message interaction response finds interaction finished and menu already recorded. correction attempts after this {correction_attempts - 1}")
+                if correction_attempts > 0:
+                    if "silent" in settings:
+                        del settings["silent"]
+                    correction_attempts -= 1
+                    settings["correction_attempts"] = correction_attempts
+                    data.base_parameter = settings
+                    return await edit_message(data)
+                return None
+            else:
+                if correction_attempts > 0:
+                    discord_logger.debug(f"found interaction want to respond to and it already was responded to but want to send a new message")
+                    settings["respond_interaction"] = False
+                    settings["reply_to"] = "event_message"
+                    correction_attempts -= 1
+                    settings["correction_attempts"] = correction_attempts
+                    # send a message the regular way but make it look the same as it would actual interaction response
+                    data.base_parameter = settings
+                    return await send_message(data)
+        else:
+            discord_logger.debug(f"found interaction want to respond to and it doesn't have a response.")
+            # interaction not done
+            if menu_name in active_node.menu_messages_info:
+                discord_logger.debug(f"found interaction want to respond to and it doesn't have a response but menu already exists. trying edit")
+                # if menu is the same message as the event's we can try editing using response
+                if correction_attempts > 0:
+                    if "silent" in settings:
+                        del settings["silent"]
+                    data.base_parameter = settings
+                    correction_attempts -= 1
+                    settings["correction_attempts"] = correction_attempts
+                    return await edit_message(data)
+                return None
+            else:
+                discord_logger.debug(f"found interaction want to respond to and it doesn't have a response so sending a new message")
+                _, send_settings = await gather_send_message_settings(data=data, settings=settings, message_components=message_components)
+                # interaction not done and new menu name. so interaction response send message
+                dirty = False
+                if send_settings["view"] is None:
+                    del message_components["view"]
+                    dirty = True
+                # interaction send_message doesn't like view being null, but message info uses null to mean no view, so remove briefly for send message
+                await event.response.send_message(**send_settings)
+                if dirty:
+                    message_components["view"] = None
+                sent_message = await event.original_response()
+                sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
+                active_node.record_menu_message(settings["menu_name"], sent_message_info)
+                data.section_data["previous_message"] = sent_message_info
+    else:
+        discord_logger.debug(f"send message not responding to interaction")
+        # any other case of not responding to interaction, or is not an interaction and don't care about this setting, just send message
+        if "ephemeral_interaction" in settings:
+            del settings["ephemeral_interaction"]
+        if menu_name in active_node.menu_messages_info:
+            discord_logger.debug(f"send message not responding to interaction and message already recorded")
+            if correction_attempts > 0:
+                if "silent" in settings:
+                    del settings["silent"]
+                if "dest_channel_id" in settings:
+                    del settings["dest_channel_id"]
+                if "reply_to" in settings:
+                    del settings["reply_to"]
+                if "dest_channel" in settings:
+                    del settings["dest_channel"]
+                correction_attempts -= 1
+                settings["correction_attempts"] = correction_attempts
+                data.base_parameter = settings
+                return await edit_message(data)
+            # menu already taken and can't edit. nothing can be done
+        else:
+            discord_logger.debug(f"send message not responding to interaction and message not recorded")
+            # if have a setting for where to send passed in, then use that don't get channel from reply stuff
+            # if function callbacks already found channel object, let it user secret location dest_channel as backup
+            dest_channel, send_settings = await gather_send_message_settings(data=data, settings=settings, message_components=message_components)
+
+            sent_message = await dest_channel.send(**send_settings)
+            sent_message_info = DiscordUtils.NodetionDCMenuInfo(sent_message, message_components["view"])
+            active_node.record_menu_message(settings["menu_name"], sent_message_info)
+            data.section_data["previous_message"] = sent_message_info
+cbUtils.set_callback_settings(send_message, schema="Schemas/sendMessage.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], reference_schemas=DISCORD_MESSAGE_SCHEMA_PACK)
+
+async def edit_message(data:cbUtils.CallbackDatapack):
+    '''callback that edits the menu specified'''
+
+    async def edit_helper(edit_settings, message_info:DiscordUtils.NodetionDCMenuInfo, interaction_mode=False):
+        nonlocal data
+        event = data.event
         if message_info.deleted:
             discord_logger.warning(f"edit message trying to edit menu <{settings['menu_name']}> but target message already deleted. not doing anything else")
             return
-        if isinstance(event, Interaction) and not event.response.is_done() and message_info.message.id == event.message.id:
-            discord_logger.debug(f"interaction event happened on same message that is targeted, can edit and respond")
-            # only do edit response if component interaction happened on targeted menu
-            await event.response.edit_message(**message_components)
+        if interaction_mode:
+            await event.response.edit_message(**edit_settings)
             edited_message = await event.original_response()
         else:
-            discord_logger.debug(f"either not interaction or cannot do interaction response, plain edit")
-            discord_logger.info(f"sanity check, message info contnt before edit {active_node.menu_messages_info[settings['menu_name']].message.content}")
-            edited_message = await message_info.message.edit(**message_components)
-        made_edits = True
-        # message object in message info is old, update
+            edited_message = await message_info.message.edit(**edit_settings)
+
         message_info.message = edited_message
-        discord_logger.info(f"sanity check, message info content after edit {active_node.menu_messages_info[settings['menu_name']].message.content}")
-        if "view" in message_components:
+        if "view" in edit_settings:
             discord_logger.debug(f"view was specified in message, removing old one")
             # this will most likely be part of message components every call, but leaving in check anyways. need to clean up old view properly
             if message_info.view is not None:
                 discord_logger.debug(f"stopping old view")
                 message_info.view.stop()
-            message_info.view = message_components["view"]
+            message_info.view = edit_settings["view"]
         data.section_data["previous_message"] = message_info
-    else:
-        discord_logger.debug(f"menu name not specified, so using origin message")
-        # menu name not specified, defaults to what caused the event
-        if isinstance(event, Interaction):
-            discord_logger.debug(f"handling interaction edit")
-            target_message = event.message
-            if not event.response.is_done():
-                discord_logger.debug(f"editing message that caused interaction")
-                await event.response.edit_message(**message_components)
-                edited_message = await event.original_response()
-            else:
-                discord_logger.debug(f"interaction response already done, regular edit")
-                edited_message = await target_message.edit(**message_components)
-            made_edits = True
 
-            # double check if message that was just edited was already tracked
-            if active_node.check_tracking(target_message.id) == "menu":
-                discord_logger.debug(f"target message is tracked as menu message, refreshing view")
-                for menu_name in active_node.menu_messages_info.keys():
-                    message_info = active_node.menu_messages_info[menu_name]
-                    if message_info.message.id == target_message.id:
-                        # found the menu with the message id just edited
-                        # getting menu name loaded so redirect has a menu name
-                        discord_logger.debug(f"found target message")
-                        settings["menu_name"] = menu_name
-                        message_info.message = edited_message
-                        if "view" in message_components:
-                            if message_info.view is not None:
-                                message_info.view.stop()
-                            message_info.view = message_components["view"]
-                        data.section_data["previous_message"] = message_info
-                        break
-        # no else, usually this would be message or slash command events and there'd be nothing to edit
-    discord_logger.debug(f"got to redirect handling, was a message edited? <{made_edits}>")
-    if made_edits and "redirect_message" in settings:
-        discord_logger.debug(f"redirect message needs to be sent")
-        redirect_message = DiscordUtils.build_discord_message(settings["redirect_message"], default_fills={"view": None})
-        if isinstance(event, Interaction) and not event.response.is_done():
-            # come to think of it this path probably won't be hit if you have to have made an edit to send redirect. because editing will try to 
-            # respond to interaction before redirect is sent
-            discord_logger.debug(f"redirect message being sent as interaction response")
-            dirty = False
-            if redirect_message["view"] is None:
-                del redirect_message["view"]
-                dirty = True
-            await event.response.send_message(**redirect_message)
-            if dirty:
-                # interaction send_message doesn't like view is None, but using none types in message info for nothing there
-                redirect_message["view"] = None
-            sent_message = await event.original_response()
-            active_node.record_menu_message(settings["menu_name"]+"_redirect", DiscordUtils.NodetionDCMenuInfo(sent_message, redirect_message["view"]))
+    active_node:DiscordNodeType.DiscordNode = data.active_node
+    event = data.event
+    bot = data.bot
+    discord_logger.info(f"edit message called on node <{active_node.id}><{active_node.graph_node.id}> event handling")
+
+    runtime_input_key = "next_message_settings"
+    override_settings = NodetionBaseFuncs.default_runtime_input_finder(runtime_input_key, data, default={})
+    settings = merge_message_settings(data.base_parameter if data.base_parameter is not None else {}, override_settings)
+    
+    discord_logger.debug(f"edit message settings are <{settings}>")
+
+    respond_interaction = "respond_interaction" in settings and \
+            isinstance(settings["respond_interaction"], bool) and \
+            settings["respond_interaction"]
+    correction_attempts = 1
+    '''number of times to allow trying something different to get message sent'''
+    if "correction_attempts" in settings and isinstance(settings["correction_attempts"], int):
+        correction_attempts = settings["correction_attempts"]
+    menu_name = settings.get("menu_name", None)
+    discord_logger.debug(f"calculated decision fields are responding to interaction <{respond_interaction}> correction attempts left <{correction_attempts}> menu name <{menu_name}>")
+
+    if respond_interaction and isinstance(event, Interaction):
+        # this is an interaction and we want to try responding.
+        # interaction response edit_message edits the message a component is attached to
+        # edit response errors if interaction already responded to
+        # only case to do the interaction response
+        discord_logger.debug(f"found interaction want to respond to. is done? {event.response.is_done()} type {event.type}")
+        if event.response.is_done():
+            discord_logger.debug(f"found interaction want to respond to but it already was responded to")
+            # response is done already, no way to use interaction response, so going to regular
+            if correction_attempts > 0:
+                correction_attempts -= 1
+                settings["correction_attempts"] = correction_attempts
+                settings["respond_interaction"] = False
+                data.base_parameter = settings
+                return await edit_message(data)
         else:
-            if isinstance(event, discord.Message):
-                reference_message = event
+            discord_logger.debug(f"found interaction want to respond to and it doesn't have a response.")
+            # trying to respond to interaction by editing
+            if menu_name is None:
+                discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name was not provided")
+                # no provided menu name to edit, assume want to edit intereaction's response message
+                # first step is checking if the interaction message is tracked to know if tracking needs to be updated
+                if event.type == InteractionType.component:
+                    interaction_message = event.message
+                else:
+                    # don't think this way would work for other nodes. no response and only thing that has a message attached is a component interaction
+                    try:
+                        interaction_message = await event.original_response()
+                        discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name was not provided, fetched original message")
+                    except Exception as e:
+                        # means interaction message couldn't be found. no way to find what message to edit or send
+                        return
+                edit_settings = DiscordUtils.build_discord_message(settings["message"], default_fills={"view":None})
+                if "ping_with_reply" in settings:
+                    edit_settings.update({"allowed_mentions": discord.AllowedMentions(replied_user=settings["ping_with_reply"])})
+                interaction_message_menu_name = active_node.get_menu_name_of(interaction_message.id)
+                if interaction_message_menu_name is None:
+                    # menu name is none, message that will be edited not being tracked. no way to add tracking
+                    return
+                else:
+                    # found tracking. edit and adjust
+                    await edit_helper(edit_settings, active_node.get_menu_info(interaction_message_menu_name), interaction_mode=True)
             else:
-                # interaction or message command context
-                reference_message = event.message
-            discord_logger.debug(f"either interaction already responded or not interaction event, redirect being sent as regular message")
-            if "ping_with_reply" in settings:
-                sent_message = await event.channel.send(**redirect_message, allowed_mentions=discord.AllowedMentions(replied_user=settings["ping_with_reply"]), reference=reference_message)
-            else:
-                sent_message = await event.channel.send(**redirect_message)
-            active_node.record_menu_message(settings["menu_name"]+"_redirect", DiscordUtils.NodetionDCMenuInfo(sent_message, redirect_message["view"]))
-    discord_logger.debug(f"finished")
-cbUtils.set_callback_settings(edit_message, schema="Schemas/editMessage.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=["Schemas/message.yml"])
+                discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name was provided")
+                # menu name provided, goal is to edit that message and if possible do it as interaction response
+                if menu_name not in active_node.menu_messages_info:
+                    discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name is not tracked")
+                    # editing not possible. going to send attempting interaction response
+                    if correction_attempts > 0:
+                        correction_attempts -= 1
+                        settings["correction_attempts"] = correction_attempts
+                        settings["reply_to"] = "event_message"
+                        data.base_parameter = settings
+                        return await send_message(data)
+                # need to check the menu for the interaction response message is the menu
+                # first is grabbing it
+                if event.type == InteractionType.component:
+                    interaction_message = event.message
+                else:
+                    # don't think this way would work for other nodes. no response and only thing that has a message attached is a component interaction
+                    try:
+                        interaction_message = await event.original_response()
+                        discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name provided fetched original message")
+                    except Exception as e:
+                        # there's nothing to edit for interaction response. try to see if regular works
+                        if correction_attempts > 0:
+                            correction_attempts -= 1
+                            settings["correction_attempts"] = correction_attempts
+                            settings["respond_interaction"] = False
+                            data.base_parameter = settings
+                            return await edit_message(data)
+                interaction_message_menu_name = active_node.get_menu_name_of(interaction_message.id)
+                if interaction_message_menu_name is None or interaction_message_menu_name != menu_name:
+                    discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name either not tracked or isn't the interaction message")
+                    if correction_attempts > 0:
+                        # either interaction message not tracked, or does not match desired menu. go to top of method to try again
+                        # with regular route
+                        settings["respond_interaction"] = False
+                        correction_attempts -= 1
+                        settings["correction_attempts"] = correction_attempts
+                        data.base_parameter = settings
+                        return await edit_message(data)
+                else:
+                    # interaction response is the menu trying to edit can do response
+                    discord_logger.debug(f"found interaction want to respond to and it doesn't have a response and menu name provided can be edited")
+                    edit_settings = DiscordUtils.build_discord_message(settings["message"], default_fills={"view":None})
+                    if "ping_with_reply" in settings:
+                        edit_settings.update({"allowed_mentions": discord.AllowedMentions(replied_user=settings["ping_with_reply"])})
+                    await edit_helper(edit_settings, active_node.get_menu_info(menu_name), interaction_mode=True)
+    else:
+        # any other case of not responding to interaction, or is not an interaction and don't care about this setting, just edit message
+        if "menu_name" not in settings:
+            # iteraction edit might not care about menu name but this one does so just in case
+            discord_logger.warning(f"trying to edit menu but none specified")
+            return
+        if settings["menu_name"] not in active_node.menu_messages_info:
+            discord_logger.debug(f"edit message found menu name listed and not recorded, going to send instead")
+            # means this menu message hasn't been sent before, can't do edit, do the send message callback, it will assume destination is same channel
+            if correction_attempts > 0:
+                correction_attempts -= 1
+                settings["correction_attempts"] = correction_attempts
+                data.base_parameter = settings
+                return await send_message(data)
+
+        edit_settings = DiscordUtils.build_discord_message(settings["message"], default_fills={"view":None})
+        if "ping_with_reply" in settings:
+            edit_settings.update({"allowed_mentions": discord.AllowedMentions(replied_user=settings["ping_with_reply"])})
+
+        message_info = active_node.menu_messages_info.get(settings["menu_name"], None)
+        await edit_helper(edit_settings=edit_settings, message_info=message_info)
+        discord_logger.debug(f"finished")
+cbUtils.set_callback_settings(edit_message, schema="Schemas/editMessage.yml", runtime_input_key="next_message_settings", allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], reference_schemas=DISCORD_MESSAGE_SCHEMA_PACK)
 
 def setup_next_message(data:cbUtils.CallbackDatapack):
     settings = data.base_parameter
@@ -343,7 +456,7 @@ def setup_next_message(data:cbUtils.CallbackDatapack):
     merge_message_settings(next_message_settings, settings)
     data.section_data["next_message_settings"] = next_message_settings
     discord_logger.debug(f"set up next message settings, stored in section data. {data.section_data.keys()}")
-cbUtils.set_callback_settings(setup_next_message, schema="Schemas/sendMessage.yml", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=["Schemas/message.yml"])
+cbUtils.set_callback_settings(setup_next_message, schema="Schemas/sendMessage.yml", allowed_purposes=[POSSIBLE_PURPOSES.ACTION], reference_schemas=DISCORD_MESSAGE_SCHEMA_PACK)
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION], schema={
     "oneOf":[
@@ -604,7 +717,7 @@ def is_reply(data:cbUtils.CallbackDatapack):
         return False
     if settings is None:
         # assume meant as reply to any message tracked by this node is ok. can be done by checking if replied to message id is tracked by node
-        return active_node.check_tracking(event.reference.message_id) is None
+        return active_node.check_tracking(event.reference.message_id) is not None
     else:
         # assume settings define a subset of messages that are what we want to check if is a reply to
         to_check_message_ids = set()

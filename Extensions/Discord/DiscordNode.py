@@ -95,6 +95,12 @@ class DiscordNode(BaseNode):
     def get_menu_info(self, menu_name):
         return self.menu_messages_info.get(menu_name, None)
     
+    def get_menu_name_of(self, message_id):
+        for menu_name, message_info in self.menu_messages_info.items():
+            if message_info.message.id == message_id:
+                return menu_name
+        return None
+    
     def get_tracked_info(self, message_id):
         for message_info in self.menu_messages_info.values():
             if message_info.message.id == message_id:

@@ -2,14 +2,29 @@
 type: object
 properties:
   menu_name:
+    description: name to refer to for later event responding
     type: string
+  correction_attempts:
+    type: integer
   message:
+    description: settings for message to send
     $ref: nodetion/extensions/discord/schemas/message
+  silent:
+    description: whether to suppress notifs
+    type: boolean
   dest_channel_id:
+    description: a different channel's id to send to instead of same
     type: string
     pattern: "((dm:|pm:)?[0-9]{17,19}|(dm:|pm:))"
+  reply_to:
+    description: message object or link to reply to
+    type: string
   ping_with_reply:
+    description: does replying mention
     type: boolean
-  redirect_message:
-    $ref: nodetion/extensions/discord/schemas/message
+  respond_interaction:
+    type: boolean
+  ephemeral_interaction:
+    type: boolean
+  #TODO allowed_mentions
 unevaluatedProperties: false
