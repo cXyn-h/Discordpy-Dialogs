@@ -64,13 +64,14 @@ def handle_save_ref(save_data, save_location, datapack):
     location:"typing.Union[BaseType.BaseNode, SessionData]" = select_from_pack(save_location, datapack)
 
     if location is None:
+        # didn't specify a valid location of datapack. can't save
         return
 
     if split_names[0] in [loc.value for loc in NODES_AND_SESSION]:
         # nodes and sessions handle saving themselves, so just pase location and data to them
         location.set_data(split_names[1:], save_data)
     else:
-        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
+        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None, custom_func_name="get_data")
     
         field_name = split_names[-1]
         if isinstance(location, dict):
@@ -93,7 +94,7 @@ def handle_delete_data(data_location, datapack):
         # nodes and sessions handle saving themselves, so just pase location and data to them
         location.delete_data(split_names[1:])
     else:
-        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None)
+        location = DotNotator.parse_dot_notation(split_names[1:-1], location, None, custom_func_name="get_data")
     
         field_name = split_names[-1]
         if isinstance(location, dict):
@@ -133,12 +134,15 @@ def default_handle_run_input(runtime_input_key, data:cbUtils.CallbackDatapack, m
     section_overrides = default_runtime_input_finder(runtime_input_key, data)
     return merge_handler(data.base_parameter, section_overrides)
 
-def get_data(datapack, location, default=None):
+def get_data(datapack, location:'str, l', default=None):
     '''use dot separate location name and grab whatever is stored there or return default if not found'''
     grab_location = select_from_pack(location, datapack)
     if grab_location is None:
         return default
-    split_grab = location.split(".")
+    if isinstance(location, str):
+        split_grab = location.split(".")
+    else:
+        split_grab = location
     return DotNotator.parse_dot_notation(split_grab[1:], grab_location, default, custom_func_name="get_data")
 
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], runtime_input_key="transfer_data_override", schema={"type":"object", "properties":{
@@ -167,12 +171,7 @@ def transfer_data(data:cbUtils.CallbackDatapack):
     if grab_location_name is None or save_locations is None:
         return
     
-    grab_location = select_from_pack(grab_location_name, data)
-    if grab_location is None:
-        return
-    split_grab = grab_location_name.split(".")
-    grab_location = DotNotator.parse_dot_notation(split_grab[1:-1], grab_location, None)
-    save_data = DotNotator.parse_dot_notation(split_grab[-1:], grab_location, None)
+    save_data = get_data(data, grab_location_name)
 
     handle_save_data(save_data, save_locations, data)
 
@@ -215,14 +214,8 @@ def increment_value(data:cbUtils.CallbackDatapack):
     section_parameter = default_handle_run_input("increment_value_override", data)
     location = section_parameter["location"]
     increment = section_parameter["increment"]
-    split_names = location.split(".")
-    
-    obj_location = select_from_pack(location, data)
-    if obj_location is None:
-        return
-    obj_location = DotNotator.parse_dot_notation(split_names[1:-1], obj_location, None)
-    field_name = split_names[-1]
-    old_value = DotNotator.parse_dot_notation([field_name], obj_location, None)
+
+    old_value = get_data(data, location)
 
     handle_save_data(old_value + increment, [location], data)
 
@@ -236,6 +229,25 @@ def random_chance(data:cbUtils.CallbackDatapack):
     num = random.random()
     return num < bar
 
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="random_choice_override", schema={
+    "type": "object",
+    "properties": {
+        "choices": {
+            "type": "array"
+        },
+        "save_location": {
+            "type": "string"
+        }
+    }
+},
+                           description_blurb="RNG with customizable chance (as a decimal number)")
+def random_choice(data:cbUtils.CallbackDatapack):
+    settings = default_handle_run_input("random_choice_override", data)
+    chosen_ind = random.randint(0, len(settings["choices"])-1)
+    chosen = settings["choices"][chosen_ind]
+
+    handle_save_data(chosen, [settings["save_location"]], data)
+
 #TODO: do nested support
     # "variable": {"type":"string", "pattern": "^(current_session|goal_session|current_node|goal_node|node|session)(\.[\w]+)+$"},
 @cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.FILTER, POSSIBLE_PURPOSES.TRANSITION_FILTER], runtime_input_key="simple_compare_override", schema={"type":"object", "properties":{
@@ -246,12 +258,8 @@ def random_chance(data:cbUtils.CallbackDatapack):
 def simple_compare(data:cbUtils.CallbackDatapack):
     settings = default_handle_run_input("simple_compare_override", data)
 
-    variable_value = None
-    split_names = settings["variable"].split(".")
-    location = select_from_pack(settings["variable"], data)
-    if location is None:
-        return
-    variable_value = DotNotator.parse_dot_notation(split_names[1:], location, None)
+    variable_value = get_data(data, settings["variable"], default=None)
+    print(f"debugging {variable_value}")
     
     if variable_value is None:
         return False
@@ -335,19 +343,20 @@ def update_timeout(data:cbUtils.CallbackDatapack):
 async def call_on_object(data:cbUtils.CallbackDatapack):
     section_parameter = default_handle_run_input("call_on_object_override", data)
     grab_location_name = section_parameter["grab_location"]
-    save_locations = section_parameter("save_locations")
+    save_locations = section_parameter["save_locations"]
 
     if grab_location_name is None or save_locations is None:
         return
 
-    grab_location = select_from_pack(grab_location_name, data)
-    if grab_location is None:
+    func = get_data(data, grab_location_name)
+    if func is None:
         return
-    split_grab = grab_location_name.split(".")
-    grab_location = DotNotator.parse_dot_notation_string(split_grab[1:], grab_location, None)
-    if inspect.isawaitable(grab_location):
-        save_data = await grab_location()
-    save_data = grab_location()
+    if inspect.isawaitable(func):
+        save_data = await func()
+    elif callable(func) :
+        save_data = func()
+    else:
+        return
 
     handle_save_data(save_data, save_locations, data)
 
@@ -401,7 +410,25 @@ def always_false_filter(data:cbUtils.CallbackDatapack):
 def always_true_filter(data:cbUtils.CallbackDatapack):
     return True
 
+@cbUtils.callback_settings(allowed_purposes=[POSSIBLE_PURPOSES.ACTION, POSSIBLE_PURPOSES.TRANSITION_ACTION], description_blurb="custom callback way to say close", schema={
+    "type": "object",
+    "properties": {
+        "close_node": {
+            "type": "boolean"
+        },
+        "close_session": {
+            "type": "boolean"
+        }
+    }
+})
+def schedule_close(data:cbUtils.CallbackDatapack):
+    settings = data.base_parameter
+    if "close_node" in settings:
+        data.control_data["close_node"] = settings["close_node"]
+    if "close_session" in settings:
+        data.control_data["close_session"] = settings["close_session"]
+
 dialog_func_info = {transfer_data:{}, always_false_filter:{}, always_true_filter:{},
-                    save_data:{}, random_chance:{}, simple_compare:{}, increment_value:{}, update_timeout:{},
-                    call_on_object:{}, delete_data:{}, has_data:{}, did_session_timeout:{}}
+                    save_data:{}, random_chance:{}, random_choice:{}, simple_compare:{}, increment_value:{}, update_timeout:{},
+                    call_on_object:{}, delete_data:{}, has_data:{}, did_session_timeout:{}, schedule_close:{}}
 

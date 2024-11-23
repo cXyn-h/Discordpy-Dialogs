@@ -746,7 +746,7 @@ required: ["id"]
             delattr(cls, "PARSED_SCHEMA")
 
     def indexer(self, keys):
-        '''custom override function for dot parser for the purpose of chainging how Graph Node is indexed. 
+        '''custom dot parser override function for the purpose of changing how Graph Node is indexed. 
         Changes how functions are indexed by. Data structure has them split into different storage areas
         but want to index by each unique function'''
         def grab_from_subsection(subsection):
