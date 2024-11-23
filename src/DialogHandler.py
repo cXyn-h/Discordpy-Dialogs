@@ -234,7 +234,6 @@ class DialogHandler():
                 warning_list.extend(self.validate_function_list(function_section))
             self.graph_node_validation_status.add_item(graph_node_name, {"yaml_warnings": warning_list}) 
         return next_nodes
-    
 
     def validate_function_list(self, function_section_info:ValidationUtils.FunctionSectionInfo):
             func_list = function_section_info.function_list
@@ -443,8 +442,10 @@ class DialogHandler():
         if graph_node.graph_starts_with_session(event_key):
             default_session_duration = graph_node.get_graph_start_session_TTL(event_key)
             if default_session_duration is not None:
+                dev_log.info(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{id(event)}><{event_key}> starting session with <{default_session_duration}> seconds found in file")
                 session = SessionData.SessionData(timeout_duration=timedelta(seconds=default_session_duration))
             else:
+                dev_log.info(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{id(event)}><{event_key}> starting session with session default timeout")
                 session = SessionData.SessionData()
             dev_log.info(f"dialog handler id'd <{id(self)}> node <{node_id}> with event <{id(event)}><{event_key}> start at found node starts with a session, created it. id: <{self.get_session_key(session)}> timeout <{session.timeout}>")
         
@@ -455,7 +456,8 @@ class DialogHandler():
         if session is not None:
             # feels more right to set up session to mirror state of node (knowing of each other) before callbacks happen on them
             # does mean circular reference to clean up
-            session.add_node(active_node)
+            added_to_session = session.add_node(active_node)
+            dev_log.info(f"dialog handler id'd <{id(self)}> node <{node_id}> event <{id(event)}><{event_key}> start_at active node <{self.get_active_node_key(active_node)}> added node to session? <{added_to_session}>")
         dev_log.debug(f"dialog handler id'd <{id(self)}> node <{node_id}> event <{id(event)}><{event_key}> start_at created active node <{self.get_active_node_key(active_node)}>, running callbacks")
         # some filters may want to depend on session data, which usually gets chance to setup on transition. Startup doesn't get any other chance
         #   than running some callbacks before filters
@@ -468,7 +470,9 @@ class DialogHandler():
             dev_log.debug(f"dialog handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at finished filter process. passed? <{start_filters_result}>")
         except Exception as e:
             start_filters_result = False
+            dev_log.info(f"dialog handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at errored in filter process. assuming failed filters")
         if not start_filters_result:
+            exec_log.info(f"dialog handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{node_id}> event <{id(event)}><{event_key}> start_at failed filter process")
             if session is not None:
                 # there's a circular reference by design, break it if it was created and node failed filters so garbage collector can get it
                 session.clear_session_history()
@@ -920,17 +924,17 @@ class DialogHandler():
             for key in _temp_control_base:
                 if key not in control_data:
                     control_data[key] = _temp_control_base[key]
+        dev_log.info(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> event <{id(event)}> unning action list <{action_list}> in section <{section_name}>")
         control_keys = control_data.keys()
         '''base set of keys this call to _action_list_runner control_data has'''
         section_data = {}
-        async def recur_list_helper(func_sub_list):
-            nonlocal control_data
+        async def recur_list_helper(func_sub_list, control_data):
             nonlocal section_data
             nonlocal control_keys
             for callback in func_sub_list:
                 # get a copy for each loop to prevent errors from building up over callbacks
                 loop_control_copy = copy.deepcopy(control_data)
-                dev_log.debug(f"callback is {callback}, data {section_data}")
+                dev_log.debug(f"callback is {callback}, data {section_data}, control data {loop_control_copy}")
                 if isinstance(callback, str):
                     # is just function name, no parameters
                     await self._run_func_async(
@@ -945,7 +949,7 @@ class DialogHandler():
                 elif isinstance(callback, SectionUtils.IfSubSection):
                     filter_res = self._filter_list_runner(active_node=active_node, event=event, filter_list=callback.filters, purpose=POSSIBLE_PURPOSES.FILTER, section_data=section_data)
                     if filter_res:
-                        await recur_list_helper(callback.actions)
+                        loop_control_copy = await recur_list_helper(callback.actions, loop_control_copy)
                 else:
                     key = list(callback.keys())[0]
                     value = callback[key]
@@ -963,7 +967,10 @@ class DialogHandler():
                 for key in control_keys:
                     if key in loop_control_copy:
                         control_data[key] = loop_control_copy[key]
-        await recur_list_helper(action_list)
+                dev_log.debug(f"control data at end of {callback}: {control_data}")
+            return control_data
+        control_data = await recur_list_helper(action_list, control_data)
+        dev_log.info(f"handler id'd <{id(self)}> node <{self.get_active_node_key(active_node)}><{active_node.graph_node.id}> event <{id(event)}> funished unning action list <{action_list}> in section <{section_name}>, control data is {control_data}")
         return control_data
     
     def _counter_runner(self, yaml_count, active_node:BaseType.BaseNode, event, action_list, purpose:POSSIBLE_PURPOSES):
@@ -1269,7 +1276,7 @@ class DialogHandler():
                 locking_tasks=existing_event_tasks,
                 waiting_period_sec=waiting_seconds
             )
-            dev_log.debug(f"handler id'd <{id(self)}> timeout waiter for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. timeout handler task <{id(timeout_handler_task)}> locking tasks found to be <{[id(task) for task in existing_event_tasks]}>")
+            dev_log.debug(f"handler id'd <{id(self)}> timeout waiter for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. created timeout handler task <{id(timeout_handler_task)}> locking tasks found to be <{[id(task) for task in existing_event_tasks]}>")
             self.advanced_event_queue.add_item(id(timeout_handler_task), timeout_handler_task)
             dev_log.debug(f"task queue size <{len(self.advanced_event_queue)}>")
             await timeout_handler_task
@@ -1286,12 +1293,10 @@ class DialogHandler():
         if issubclass(timeoutable.__class__, BaseType.BaseNode):
             type = "Node"
             nodes = [self.get_active_node_key(timeoutable)]
-            task_key = self.advanced_event_queue.get_keys(self.get_active_node_key(timeoutable), index_name="node_timeouts",default=[None])[0]
         elif isinstance(timeoutable, SessionData.SessionData):
             type = "Session"
             nodes = [self.get_active_node_key(node) for node in timeoutable.linked_nodes]
-            task_key = self.advanced_event_queue.get_keys(self.get_session_key(timeoutable), index_name="session_timeouts", default=[None])[0]
-        task = self.advanced_event_queue.get_ref(task_key)
+        task = asyncio.current_task()
         event = {"type": type, "original_timeout": timeoutable.timeout}
         #TODO: timeout handler when object is wrong type?
         dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. started")
@@ -1309,9 +1314,9 @@ class DialogHandler():
         if timeoutable.timeout is not None and timeoutable.timeout <= datetime.utcnow():
             dev_log.debug(f"handler id'd <{id(self)}> timeout handler for <{type}><{self.get_active_node_key(timeoutable) if type == 'Node' else self.get_session_key(timeoutable)}>. found timeout gone, need to close")
             if type == "Node":
-                await self.close_node(timeoutable)
+                await self.close_node(timeoutable, timed_out=True)
             else:
-                await self.close_session(timeoutable)
+                await self.close_session(timeoutable, timed_out=True)
 
     '''#############################################################################################
     ################################################################################################
